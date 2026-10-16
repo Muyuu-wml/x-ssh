@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>x-ssh</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="window-titlebar" id="window-titlebar">
+      <div class="window-caption"><img src="/src/assets/images/logo.png" alt="" draggable="false" /><span>X-ssh</span></div>
+      <div class="window-controls">
+        <button class="window-control" id="window-minimise" title="最小化" aria-label="最小化" data-icon="minimise"></button>
+        <button class="window-control" id="window-maximise" title="最大化" aria-label="最大化" data-icon="maximise"></button>
+        <button class="window-control window-close" id="window-close" title="关闭窗口" aria-label="关闭窗口" data-icon="close"></button>
+      </div>
+    </header>
+    <div id="app">
+      <!-- ---------------------------------------------------------- sidebar -->
+      <aside id="sidebar">
+        <div class="sidebar-head">
+          <img class="brand-logo" src="/src/assets/images/logo.png" alt="X-ssh 标志" />
+          <span class="brand-name">X-ssh <span class="brand-caption">连接工作区</span></span>
+          <span class="workspace-badge">本地</span>
+        </div>
+
+        <div class="sidebar-actions">
+          <div class="search-wrap">
+            <span data-icon="search"></span>
+            <input id="search" class="search" type="search" placeholder="搜索主机…" aria-label="搜索主机" autocomplete="off" spellcheck="false" />
+            <kbd>Ctrl F</kbd>
+          </div>
+          <div class="sidebar-section">
+            <span>主机 <span class="count" id="host-count">0</span></span>
+            <div class="section-actions">
+              <button class="icon-btn" id="btn-new-group" title="新建分组" aria-label="新建分组" data-icon="folderPlus"></button>
+              <button class="icon-btn" id="btn-new-host" title="新建主机" aria-label="新建主机" data-icon="plus"></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tree" id="tree"></div>
+        <div class="sidebar-foot">
+          <button class="settings-button" id="btn-settings"><span data-icon="settings"></span>设置</button>
+          <span class="sidebar-foot-note">SSH / SFTP</span>
+        </div>
+      </aside>
+
+      <!-- ------------------------------------------------------------- main -->
+      <main id="main">
+        <header class="workspace-header">
+          <div class="workspace-location"><button class="icon-btn workspace-home" id="btn-workspace" title="返回工作区（保留会话）" aria-label="返回工作区" data-icon="grid"></button><span id="workspace-title">主机连接</span></div>
+          <span class="workspace-context" id="workspace-context">本地工作区</span>
+        </header>
+        <div class="session-bar hidden" id="session-bar">
+          <div class="tabstrip" id="tabstrip"></div>
+          <button class="icon-btn" id="btn-find-host" title="搜索主机（Ctrl F）" aria-label="搜索主机" data-icon="plus"></button>
+        </div>
+        <div class="panes" id="panes"></div>
+
+        <div class="empty" id="empty">
+          <div class="dashboard">
+            <div class="dashboard-heading">
+              <div><div class="eyebrow">连接工作区</div><h1>连接，从这里开始。</h1><p>管理主机、打开终端、传输文件，专注每一次连接。</p></div>
+              <button class="icon-btn dashboard-add" id="btn-empty-new" title="新建主机" aria-label="新建主机"><span data-icon="plus"></span></button>
+            </div>
+            <div class="collection-head"><h2>已保存的主机 <span class="count" id="dashboard-count">0</span></h2><span>选择主机，打开终端</span></div>
+            <div class="host-groups" id="host-grid"></div>
+            <div class="workspace-tips">
+              <span><kbd>Ctrl F</kbd> 搜索主机</span>
+              <span><kbd>Ctrl W</kbd> 关闭会话</span>
+              <span><span data-icon="transfer"></span> 通过 SFTP 管理文件</span>
+            </div>
+          </div>
+        </div>
+        <footer class="workspace-footer"><span><span class="status-dot"></span><span id="session-summary">暂无活动会话</span></span><span>X-ssh <span class="footer-divider">/</span> 本地工作区</span></footer>
+      </main>
+    </div>
+
+    <!-- ------------------------------------------------------- transfer bar -->
+    <div id="transfer-bar" class="transfer-bar hidden">
+      <span class="transfer-name" id="transfer-name"></span>
+      <div class="transfer-track"><div class="transfer-fill" id="transfer-fill"></div></div>
+      <span class="transfer-pct" id="transfer-pct"></span>
+      <button class="icon-btn" id="transfer-hide" title="隐藏" aria-label="隐藏传输进度" data-icon="close"></button>
+    </div>
+
+    <!-- ------------------------------------------------------------ modals -->
+    <div id="modal-root"></div>
+
+    <!-- ------------------------------------------------------------ toasts -->
+    <div id="toasts"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

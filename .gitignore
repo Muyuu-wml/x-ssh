@@ -1,0 +1,37 @@
+build/bin
+/x-ssh.exe
+/x-ssh-preview.exe
+node_modules
+frontend/dist
+
+# Local connection data and credentials (including encrypted copies)
+profile.json*
+known_hosts.json*
+master.key*
+.env
+.env.*
+!.env.example
+!.env.sample
+.ssh/
+*.pem
+*.key
+*.ppk
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+credentials.json
+secrets.json
+
+# Local artifacts and tooling
+*.exe
+*.exe~
+*.log
+*.bak
+*.tmp
+.codegraph/
+.idea/
+.vscode/
+frontend/package.json.md5
