@@ -13,6 +13,8 @@ const paths = {
   up: '<path d="M12 20V4m-6 6 6-6 6 6"/>',
   upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
   download: '<path d="M12 3v13m-5-5 5 5 5-5M4 16v5h16v-5"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  paste: '<path d="M9 5h6m-5-2h4a1 1 0 0 1 1 1v1H9V4a1 1 0 0 1 1-1Z"/><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 10h6m-6 4h6m-6 4h4"/>',
   refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 6a8 8 0 0 1 13 2M5 16a8 8 0 0 0 13 2"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z"/>',
   folderPlus: '<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z"/><path d="M12 10v6m-3-3h6"/>',

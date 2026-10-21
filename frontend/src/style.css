@@ -578,6 +578,41 @@ body {
 }
 
 /* --------------------------------------------------------------- terminal */
+.term-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: 38px;
+  padding: var(--space-4) var(--space-16);
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-dim);
+}
+
+.term-toolbar-title {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.term-toolbar-hint {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.term-toolbar-spacer {
+  flex: 1;
+}
+
+.term-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.term-action .icon {
+  width: 14px;
+  height: 14px;
+}
+
 .term-host {
   flex: 1;
   min-height: 0;

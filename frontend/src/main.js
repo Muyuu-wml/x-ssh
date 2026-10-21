@@ -39,7 +39,15 @@ import {
   ListKnownHosts,
   ForgetHostKey,
 } from "../wailsjs/go/main/App";
-import { EventsOn, WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from "../wailsjs/runtime/runtime";
+import {
+  EventsOn,
+  WindowMinimise,
+  WindowToggleMaximise,
+  WindowIsMaximised,
+  ClipboardGetText,
+  ClipboardSetText,
+  Quit,
+} from "../wailsjs/runtime/runtime";
 import { icon, mountIcons } from "./icons";
 import { themes, loadAppearance, saveAppearance, applyAppearance } from "./appearance";
 
@@ -482,6 +490,50 @@ function closeTab(id) {
 
 /* ==================================================================== ssh */
 
+async function writeClipboard(text) {
+  try {
+    if (await ClipboardSetText(text)) return;
+  } catch (_) {
+    // The browser fallback keeps clipboard actions usable during frontend dev.
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  throw new Error("系统剪贴板不可用");
+}
+
+async function readClipboard() {
+  try {
+    const text = await ClipboardGetText();
+    if (typeof text === "string") return text;
+  } catch (_) {
+    // The browser fallback keeps clipboard actions usable during frontend dev.
+  }
+  if (navigator.clipboard?.readText) return navigator.clipboard.readText();
+  throw new Error("系统剪贴板不可用");
+}
+
+function copyTerminalSelection(tab, notifyEmpty = false) {
+  const text = tab.term?.getSelection() || "";
+  if (!text) {
+    if (notifyEmpty) toast("请先在终端中选择要复制的内容", "info", 2600);
+    return false;
+  }
+  writeClipboard(text)
+    .then(() => toast("已复制到剪贴板", "success", 2200))
+    .catch((err) => fail(err, "复制失败"));
+  return true;
+}
+
+function pasteTerminalClipboard(tab) {
+  readClipboard()
+    .then((text) => {
+      if (!tab.disposed && text) tab.term?.paste(text);
+    })
+    .catch((err) => fail(err, "粘贴失败"));
+}
+
 function openTerminalTab(host) {
   const tab = {
     id: nextTabId(),
@@ -497,9 +549,21 @@ function openTerminalTab(host) {
   pane.className = "pane hidden";
   pane.innerHTML = `
     <div class="term-banner" data-banner style="display:none"></div>
+    <div class="term-toolbar">
+      <span class="term-toolbar-title">SSH 终端</span>
+      <span class="term-toolbar-hint">Ctrl/Cmd+C 复制 · Ctrl/Cmd+V 粘贴</span>
+      <span class="term-toolbar-spacer"></span>
+      <button class="btn btn-sm term-action" data-term-action="copy" title="复制选中的终端内容" aria-label="复制选中的终端内容">${icon("copy")}<span>复制</span></button>
+      <button class="btn btn-sm term-action" data-term-action="paste" title="粘贴剪贴板内容" aria-label="粘贴剪贴板内容">${icon("paste")}<span>粘贴</span></button>
+    </div>
     <div class="term-host" data-termhost></div>`;
   $("#panes").appendChild(pane);
   tab.paneEl = pane;
+  pane.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-term-action]")?.dataset.termAction;
+    if (action === "copy") copyTerminalSelection(tab, true);
+    if (action === "paste") pasteTerminalClipboard(tab);
+  });
 
   const term = new Terminal({
     fontFamily: cssVar("--mono", 'Consolas, "Microsoft YaHei UI", monospace'),
@@ -512,8 +576,28 @@ function openTerminalTab(host) {
     theme: terminalTheme(),
   });
   term.attachCustomKeyEventHandler((event) => {
+    if (event.type === "keydown") {
+      const key = event.key.toLowerCase();
+      const modifier = event.ctrlKey || event.metaKey;
+      if (modifier && key === "c" && term.hasSelection()) {
+        copyTerminalSelection(tab);
+        return false;
+      }
+      if (modifier && key === "v") {
+        // Prevent the browser's native paste event from running as well.
+        // Otherwise the clipboard would be sent to the remote shell twice.
+        event.preventDefault();
+        pasteTerminalClipboard(tab);
+        return false;
+      }
+      if (event.shiftKey && key === "insert") {
+        event.preventDefault();
+        pasteTerminalClipboard(tab);
+        return false;
+      }
+    }
     // Workspace shortcuts must not also send control characters to the shell.
-    return !((event.ctrlKey || event.metaKey) && ["f", "k", "w"].includes(event.key.toLowerCase()));
+    return !(event.ctrlKey || event.metaKey) || !["f", "k", "w"].includes(event.key.toLowerCase());
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
