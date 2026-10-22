@@ -24,6 +24,9 @@ import {
   SftpRename,
   SftpUpload,
   SftpDownload,
+  SftpCancelTask,
+  SftpRetryTask,
+  SftpClearTasks,
   SftpClose,
   LocalHome,
   LocalDrives,
@@ -38,6 +41,10 @@ import {
   GetAppInfo,
   ListKnownHosts,
   ForgetHostKey,
+  TrustHostKey,
+  ExportHosts,
+  ImportHosts,
+  ReadBackupFile,
 } from "../wailsjs/go/main/App";
 import {
   EventsOn,
@@ -49,6 +56,7 @@ import {
   Quit,
 } from "../wailsjs/runtime/runtime";
 import { icon, mountIcons } from "./icons";
+import { distroIcon } from "./distros";
 import { themes, loadAppearance, saveAppearance, applyAppearance } from "./appearance";
 
 /* ================================================================== helpers */
@@ -213,11 +221,77 @@ function promptDialog({ title, label, value = "", confirmLabel = "保存" }) {
   });
 }
 
-/* ==================================================================== state */
+/* ------------------------------------------------------- host key trust */
 
+const UNKNOWN_HOSTKEY = "UNKNOWN_HOSTKEY|";
+
+/** Parses the marker error raised when a host has no approved fingerprint. */
+function parseUnknownHostKey(err) {
+  const text = err && err.message ? err.message : String(err ?? "");
+  const idx = text.indexOf(UNKNOWN_HOSTKEY);
+  if (idx < 0) return null;
+  const [hostport, fingerprint, algorithm] = text.slice(idx + UNKNOWN_HOSTKEY.length).split("|");
+  if (!hostport || !fingerprint) return null;
+  return { hostport, fingerprint, algorithm: algorithm || "" };
+}
+
+/** First-connect fingerprint confirmation. Resolves true when trusted. */
+function confirmHostKey({ hostport, fingerprint, algorithm }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `
+      <div class="modal" style="width:480px">
+        <div class="modal-head">首次连接：确认主机身份</div>
+        <div class="modal-body">
+          <p style="margin:0 0 10px">首次连接 <strong>${esc(hostport)}</strong>，请核对服务器指纹后再继续：</p>
+          <div class="field"><label>密钥类型</label><code>${esc(algorithm || "未知")}</code></div>
+          <div class="field"><label>指纹 (SHA256)</label><code style="word-break:break-all">${esc(fingerprint)}</code></div>
+          <p class="dim" style="margin:10px 0 0;font-size:var(--fs-xs);color:var(--text-dim)">
+            可在服务器上执行 <code>ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub</code> 比对。
+            指纹不一致说明连接可能被劫持，请勿信任。信任后指纹将被固定，之后指纹变化会拒绝连接。
+          </p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" data-act="cancel">取消</button>
+          <button class="btn btn-primary" data-act="ok">信任并连接</button>
+        </div>
+      </div>`;
+    const close = (value) => {
+      backdrop.remove();
+      resolve(value);
+    };
+    backdrop.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "ok") close(true);
+      else if (act === "cancel" || e.target === backdrop) close(false);
+    });
+    $("#modal-root").appendChild(backdrop);
+  });
+}
+
+/**
+ * Runs open() and, when it fails because the host key is not approved yet,
+ * asks the user. Trusting pins the exact fingerprint shown, then retries once.
+ */
+async function withHostKeyConfirm(open) {
+  try {
+    return await open();
+  } catch (err) {
+    const info = parseUnknownHostKey(err);
+    if (!info) throw err;
+    const trusted = await confirmHostKey(info);
+    if (!trusted) throw new Error("已取消连接：未信任该主机。");
+    await TrustHostKey(info.hostport, info.fingerprint);
+    return open();
+  }
+}
+
+/* ==================================================================== state */
 const state = {
   profile: { groups: [], hosts: [] },
   tabs: [],
+  transfers: new Map(), // task id -> latest sftp:task snapshot
   activeTabId: null,
   selectedHostId: null,
   appearance: loadAppearance(),
@@ -283,12 +357,17 @@ function childGroups(parentId) {
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 }
 
+// 主机图标：已检测到发行版时显示品牌 logo，否则显示通用服务器图标。
+function hostSymbol(host) {
+  return distroIcon(host?.distro) || icon("server");
+}
+
 function hostRowHTML(host) {
   const active = activeTab()?.hostId === host.id;
   const selected = state.selectedHostId === host.id;
   return `
     <div class="host-row ${active ? "active" : ""} ${selected ? "selected" : ""}" tabindex="0" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" aria-label="${esc(host.name || host.address)}，单击选中，双击连接，拖动调整同组主机顺序" title="${esc(host.username)}@${esc(host.address)}:${host.port} · 双击连接 · 拖动排序">
-      <div class="host-avatar">${icon("server")}</div>
+      <div class="host-avatar">${hostSymbol(host)}</div>
       <div class="host-meta">
         <div class="host-name">${esc(host.name || host.address)}</div>
         <div class="host-addr">${esc(host.username)}@${esc(host.address)}:${host.port}</div>
@@ -352,7 +431,7 @@ function renderSidebar() {
 function hostCardHTML(host, groupName) {
   const name = host.name || host.address;
   return `<article class="host-card" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" title="拖动调整同组主机顺序">
-    <span class="host-card-symbol" title="${esc(groupName)}">${icon("server")}</span>
+    <span class="host-card-symbol" title="${esc(groupName)}">${hostSymbol(host)}</span>
     <div class="host-card-info">
       <span class="host-card-name" title="${esc(name)}">${esc(name)}</span>
       <span class="host-card-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${esc(host.address)}:${host.port}</span>
@@ -514,12 +593,9 @@ async function readClipboard() {
   throw new Error("系统剪贴板不可用");
 }
 
-function copyTerminalSelection(tab, notifyEmpty = false) {
+function copyTerminalSelection(tab) {
   const text = tab.term?.getSelection() || "";
-  if (!text) {
-    if (notifyEmpty) toast("请先在终端中选择要复制的内容", "info", 2600);
-    return false;
-  }
+  if (!text) return false;
   writeClipboard(text)
     .then(() => toast("已复制到剪贴板", "success", 2200))
     .catch((err) => fail(err, "复制失败"));
@@ -549,21 +625,9 @@ function openTerminalTab(host) {
   pane.className = "pane hidden";
   pane.innerHTML = `
     <div class="term-banner" data-banner style="display:none"></div>
-    <div class="term-toolbar">
-      <span class="term-toolbar-title">SSH 终端</span>
-      <span class="term-toolbar-hint">Ctrl/Cmd+C 复制 · Ctrl/Cmd+V 粘贴</span>
-      <span class="term-toolbar-spacer"></span>
-      <button class="btn btn-sm term-action" data-term-action="copy" title="复制选中的终端内容" aria-label="复制选中的终端内容">${icon("copy")}<span>复制</span></button>
-      <button class="btn btn-sm term-action" data-term-action="paste" title="粘贴剪贴板内容" aria-label="粘贴剪贴板内容">${icon("paste")}<span>粘贴</span></button>
-    </div>
     <div class="term-host" data-termhost></div>`;
   $("#panes").appendChild(pane);
   tab.paneEl = pane;
-  pane.addEventListener("click", (event) => {
-    const action = event.target.closest("[data-term-action]")?.dataset.termAction;
-    if (action === "copy") copyTerminalSelection(tab, true);
-    if (action === "paste") pasteTerminalClipboard(tab);
-  });
 
   const term = new Terminal({
     fontFamily: cssVar("--mono", 'Consolas, "Microsoft YaHei UI", monospace'),
@@ -611,7 +675,7 @@ function openTerminalTab(host) {
 
   requestAnimationFrame(() => {
     fit.fit();
-    OpenSession(host.id, term.cols, term.rows)
+    withHostKeyConfirm(() => OpenSession(host.id, term.cols, term.rows))
       .then((info) => {
         if (tab.disposed) {
           // The tab was closed while the connection was still being made.
@@ -655,14 +719,17 @@ function showBanner(tab, message, kind = "error") {
   banner.className = `term-banner${kind ? ` ${kind}` : ""}`;
   banner.innerHTML = `<span>${esc(message)}</span><button class="btn btn-sm" data-act="retry">重新连接</button>`;
   banner.querySelector('[data-act="retry"]').addEventListener("click", () => {
-    banner.style.display = "none";
     const host = state.profile.hosts.find((h) => h.id === tab.hostId);
     if (!host) return;
     tab.error = "";
     tab.status = "connecting";
     tab.disposed = false;
+    // Reconnecting replaces the banner in place, so a second click cannot open
+    // a parallel session for the same tab.
+    banner.className = "term-banner";
+    banner.innerHTML = `<span>正在重新连接…</span>`;
     renderTabstrip();
-    OpenSession(host.id, tab.term.cols, tab.term.rows)
+    withHostKeyConfirm(() => OpenSession(host.id, tab.term.cols, tab.term.rows))
       .then((info) => {
         if (tab.disposed) {
           CloseSession(info.id).catch(() => {});
@@ -808,7 +875,7 @@ function openSftpTab(host) {
     })
     .catch((err) => fail(err, "读取本地文件失败"));
 
-  SftpOpen(host.id)
+  withHostKeyConfirm(() => SftpOpen(host.id))
     .then((sessionId) => {
       if (tab.disposed) {
         SftpClose(sessionId).catch(() => {});
@@ -1093,7 +1160,7 @@ async function doUpload(tab, entry = tab.localSel) {
   if (!sel) return toast("请先在本地面板中选择文件或文件夹。", "info", 3000);
   try {
     await SftpUpload(tab.sessionId, sel.path, tab.remotePath);
-    toast(`正在上传 ${sel.name}…`, "info", 2200);
+    showTransferPanel();
   } catch (err) {
     fail(err, "上传失败");
   }
@@ -1105,7 +1172,7 @@ async function doDownload(tab, entry = tab.remoteSel) {
   if (!sel) return toast("请先在远程面板中选择文件或文件夹。", "info", 3000);
   try {
     await SftpDownload(tab.sessionId, sel.path, tab.localPath);
-    toast(`正在下载 ${sel.name}…`, "info", 2200);
+    showTransferPanel();
   } catch (err) {
     fail(err, "下载失败");
   }
@@ -1355,6 +1422,14 @@ async function openSettings() {
         </div>
         <div class="appearance-actions"><span class="hint">主题与透明度自动保存，下次启动沿用。</span><button class="btn btn-sm" data-act="reset-appearance">恢复默认</button></div>
         <div class="field">
+          <label>主机备份</label>
+          <div class="hint">导出文件用你设置的密码加密，包含分组、主机和已保存的凭据，可在另一台电脑导入。文件不含明文密码，请牢记密码——丢失后无法恢复。</div>
+          <div class="appearance-actions">
+            <button class="btn btn-sm" data-act="export-backup">${icon("download")}导出</button>
+            <button class="btn btn-sm" data-act="import-backup">${icon("upload")}导入</button>
+          </div>
+        </div>
+        <div class="field">
           <label>关于</label>
           <div class="hint">版本 ${esc(info.version)} · 主密钥来源：<b>${esc(keySource)}</b></div>
         </div>
@@ -1412,6 +1487,14 @@ async function openSettings() {
       return;
     }
     const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "export-backup") {
+      exportBackupDialog();
+      return;
+    }
+    if (act === "import-backup") {
+      importBackupDialog();
+      return;
+    }
     if (act === "close" || e.target === backdrop) backdrop.remove();
   });
 
@@ -1427,6 +1510,117 @@ async function openSettings() {
   });
   opacity.addEventListener("change", persistAppearance);
   $("#modal-root").appendChild(backdrop);
+}
+
+/* ================================================================== backup */
+
+function exportBackupDialog() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal" style="width:440px">
+      <div class="modal-head">导出主机配置</div>
+      <div class="modal-body">
+        <div class="hint">导出内容使用该密码加密。导入时需要输入同一密码，密码丢失后备份无法解密。</div>
+        <div class="field"><label>备份密码</label><input type="password" id="bk-pass" autocomplete="new-password" /></div>
+        <div class="field"><label>确认密码</label><input type="password" id="bk-pass2" autocomplete="new-password" /></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-act="cancel">取消</button>
+        <button class="btn btn-primary" data-act="ok">${icon("download")}导出</button>
+      </div>
+    </div>`;
+  const pass = backdrop.querySelector("#bk-pass");
+  const pass2 = backdrop.querySelector("#bk-pass2");
+  const submit = async () => {
+    if (!pass.value.trim()) return toast("请设置备份密码", "error");
+    if (pass.value !== pass2.value) return toast("两次输入的密码不一致", "error");
+    try {
+      const path = await ExportHosts(pass.value);
+      backdrop.remove();
+      if (path) toast(`已导出到 ${path}`, "success", 6000);
+    } catch (err) {
+      fail(err, "导出失败");
+    }
+  };
+  backdrop.addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "ok") submit();
+    else if (act === "cancel" || e.target === backdrop) backdrop.remove();
+  });
+  backdrop.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+    if (e.key === "Escape") backdrop.remove();
+  });
+  $("#modal-root").appendChild(backdrop);
+  pass.focus();
+}
+
+function importBackupDialog() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal" style="width:520px">
+      <div class="modal-head">导入主机配置</div>
+      <div class="modal-body">
+        <div class="field">
+          <label>备份内容</label>
+          <textarea id="bk-text" rows="8" spellcheck="false" placeholder="粘贴导出文件的内容，或点击下方按钮选择文件"></textarea>
+          <div class="appearance-actions" style="margin-top:var(--space-8)">
+            <button class="btn btn-sm" data-act="pick">${icon("folder")}选择备份文件…</button>
+            <span class="hint" id="bk-src"></span>
+          </div>
+        </div>
+        <div class="field"><label>备份密码</label><input type="password" id="bk-pass" autocomplete="off" /></div>
+        <div class="hint">按 ID 合并：已存在的主机会被备份覆盖，其余追加，不会清空现有配置。</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" data-act="cancel">取消</button>
+        <button class="btn btn-primary" data-act="ok">${icon("upload")}导入</button>
+      </div>
+    </div>`;
+  const text = backdrop.querySelector("#bk-text");
+  const pass = backdrop.querySelector("#bk-pass");
+  const okBtn = backdrop.querySelector('[data-act="ok"]');
+  const submit = async () => {
+    if (!text.value.trim()) return toast("请先粘贴备份内容或选择文件", "error");
+    if (!pass.value.trim()) return toast("请输入备份密码", "error");
+    okBtn.disabled = true;
+    try {
+      const sum = await ImportHosts(text.value, pass.value);
+      backdrop.remove();
+      await reloadProfile();
+      toast(
+        `导入完成：新增主机 ${sum.hostsAdded}，更新 ${sum.hostsUpdated}；新增分组 ${sum.groupsAdded}`,
+        "success",
+        6000
+      );
+    } catch (err) {
+      okBtn.disabled = false;
+      fail(err, "导入失败");
+    }
+  };
+  backdrop.addEventListener("click", async (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "pick") {
+      try {
+        const content = await ReadBackupFile();
+        if (content) {
+          text.value = content;
+          backdrop.querySelector("#bk-src").textContent = "已读取文件内容";
+          pass.focus();
+        }
+      } catch (err) {
+        fail(err, "读取备份文件失败");
+      }
+    } else if (act === "ok") submit();
+    else if (act === "cancel" || e.target === backdrop) backdrop.remove();
+  });
+  backdrop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") backdrop.remove();
+  });
+  $("#modal-root").appendChild(backdrop);
+  text.focus();
 }
 
 /* ================================================================== reload */
@@ -1596,7 +1790,6 @@ function wireEvents() {
   $("#btn-empty-new").addEventListener("click", () => hostEditor(null));
   $("#btn-new-group").addEventListener("click", () => groupEditor(null));
   $("#btn-settings").addEventListener("click", openSettings);
-  $("#btn-find-host").addEventListener("click", () => $("#search").focus());
 
   $("#host-grid").addEventListener("click", (e) => {
     const act = e.target.closest("[data-act]")?.dataset.act;
@@ -1751,30 +1944,115 @@ function wireBackendEvents() {
     else bufferEvent(info.id, { type: "state", payload: info });
   });
 
-  EventsOn("sftp:status", (payload) => {
-    const bar = $("#transfer-bar");
-    // Progress events carry done/total; completion events carry ok.
-    if (typeof payload.ok === "boolean") {
-      if (payload.ok) {
-        toast(`${payload.kind === "upload" ? "上传完成" : "下载完成"}：${payload.name}`, "success", 3000);
-        bar.classList.add("hidden");
-      } else {
-        toast(`${payload.kind === "upload" ? "上传" : "下载"}失败：${payload.error}`, "error", 7000);
-        bar.classList.add("hidden");
-      }
-      const tab = state.tabs.find((t) => t.sessionId === payload.sessionId);
-      if (tab) refreshSide(tab, payload.kind === "upload" ? "remote" : "local");
-      return;
+  EventsOn("sftp:task", (task) => {
+    const prev = state.transfers.get(task.id);
+    state.transfers.set(task.id, task);
+
+    // Refresh the destination pane once when a transfer lands.
+    if (task.status === "done" && prev?.status !== "done") {
+      const tab = state.tabs.find((t) => t.sessionId === task.sessionId);
+      // The tab may have closed while the transfer was finishing.
+      if (tab) refreshSide(tab, task.kind === "upload" ? "remote" : "local").catch(() => {});
+    }
+    if (task.status === "failed" && prev?.status !== "failed") {
+      toast(`${task.kind === "upload" ? "上传" : "下载"}失败：${task.name} — ${task.error}`, "error", 7000);
     }
 
-    bar.classList.remove("hidden");
-    $("#transfer-name").textContent = `${payload.kind === "upload" ? "↑" : "↓"} ${payload.name}`;
-    const pct = payload.total > 0 ? Math.min(100, (payload.done / payload.total) * 100) : 0;
-    $("#transfer-fill").style.width = `${pct}%`;
-    $("#transfer-pct").textContent = payload.total > 0 ? `${pct.toFixed(0)}%` : humanSize(payload.done);
+    // Only a new task re-opens the panel; hiding it must stick while the
+    // remaining transfers keep reporting progress.
+    if (!prev) showTransferPanel();
+    renderTransfers();
   });
 
-  $("#transfer-hide").addEventListener("click", () => $("#transfer-bar").classList.add("hidden"));
+  EventsOn("host:distro", (payload) => {
+    const host = state.profile?.hosts?.find((h) => h.id === payload.hostId);
+    if (!host || host.distro === payload.distro) return;
+    host.distro = payload.distro;
+    renderSidebar();
+  });
+
+  $("#transfer-hide").addEventListener("click", () => $("#transfer-panel").classList.add("hidden"));
+  $("#transfer-collapse").addEventListener("click", () => $("#transfer-panel").classList.toggle("collapsed"));
+  $("#transfer-clear").addEventListener("click", async () => {
+    try {
+      await SftpClearTasks(""); // every session
+    } catch {
+      // Sessions may already be gone; clearing the local list is still right.
+    }
+    for (const [id, t] of state.transfers) {
+      if (t.status !== "queued" && t.status !== "running") state.transfers.delete(id);
+    }
+    renderTransfers();
+  });
+  $("#transfer-list").addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const task = state.transfers.get(btn.dataset.task);
+    if (!task) return;
+    try {
+      if (btn.dataset.act === "cancel") await SftpCancelTask(task.sessionId, task.id);
+      if (btn.dataset.act === "retry") await SftpRetryTask(task.sessionId, task.id);
+    } catch (err) {
+      fail(err, btn.dataset.act === "cancel" ? "取消失败" : "重试失败");
+    }
+  });
+}
+
+/* ========================================================== transfer panel */
+
+function showTransferPanel() {
+  $("#transfer-panel").classList.remove("hidden");
+}
+
+const transferStates = {
+  queued: "排队中",
+  running: "传输中",
+  done: "已完成",
+  failed: "失败",
+  canceled: "已取消",
+};
+
+function transferMeta(task) {
+  if (task.status === "failed") return task.error || "失败";
+  if (task.status === "running") {
+    const size = task.total > 0 ? `${humanSize(task.done)} / ${humanSize(task.total)}` : humanSize(task.done);
+    return task.file && task.file !== task.name ? `${task.file} · ${size}` : size;
+  }
+  return transferStates[task.status] || task.status;
+}
+
+function renderTransfers() {
+  const tasks = [...state.transfers.values()];
+  const active = tasks.filter((t) => t.status === "queued" || t.status === "running").length;
+  $("#transfer-summary").textContent = active
+    ? `${active} 项进行中 · 共 ${tasks.length} 项`
+    : tasks.length
+      ? `共 ${tasks.length} 项`
+      : "暂无传输任务";
+
+  $("#transfer-list").innerHTML = tasks
+    .map((task) => {
+      const pct = task.total > 0 ? Math.min(100, (task.done / task.total) * 100) : task.status === "done" ? 100 : 0;
+      const actions =
+        task.status === "queued" || task.status === "running"
+          ? `<button class="icon-btn" data-act="cancel" data-task="${esc(task.id)}" title="取消">${icon("close")}</button>`
+          : task.status === "done"
+            ? ""
+            : `<button class="icon-btn" data-act="retry" data-task="${esc(task.id)}" title="重试">${icon("refresh")}</button>`;
+      return `
+        <div class="transfer-row ${esc(task.status)}">
+          ${icon(task.kind === "upload" ? "upload" : "download")}
+          <div class="transfer-main">
+            <div class="transfer-name" title="${esc(task.name)}">${esc(task.name)}</div>
+            <div class="transfer-meta">
+              <div class="transfer-track"><div class="transfer-fill${task.status === "failed" ? " failed" : ""}" style="width:${pct}%"></div></div>
+              <span class="transfer-state" title="${esc(transferMeta(task))}">${esc(transferMeta(task))}</span>
+            </div>
+          </div>
+          <span>${actions}</span>
+        </div>`;
+    })
+    .join("");
 }
 
 /* ==================================================================== init */

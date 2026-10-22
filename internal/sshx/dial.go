@@ -98,6 +98,58 @@ func Dial(p Params, kh *KnownHosts, timeout time.Duration) (*ssh.Client, error) 
 	return ssh.NewClient(sshConn, chans, reqs), nil
 }
 
+// HostKeyInfo describes the key a server presents.
+type HostKeyInfo struct {
+	Fingerprint string // SHA256:...
+	Algorithm   string // ssh-ed25519, ecdsa-sha2-nistp256, ...
+}
+
+// errProbeDone aborts the handshake once the host key has been captured. The
+// probe never authenticates, so the server sees no login attempt.
+var errProbeDone = errors.New("host key captured")
+
+// ProbeHostKey reads the host key a server presents without logging in.
+//
+// The first-connect dialog needs the fingerprint before a real session is
+// opened: the handshake's deadline cannot wait for a human to read a modal, so
+// the key is fetched up front and the actual connection happens after approval.
+func ProbeHostKey(p Params, timeout time.Duration) (HostKeyInfo, error) {
+	if p.Address == "" {
+		return HostKeyInfo{}, errors.New("address is required")
+	}
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+
+	target, _ := p.Endpoint()
+
+	var found HostKeyInfo
+	cfg := &ssh.ClientConfig{
+		User: "probe",
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			found = HostKeyInfo{Fingerprint: ssh.FingerprintSHA256(key), Algorithm: key.Type()}
+			return errProbeDone
+		},
+		Timeout: timeout,
+	}
+
+	dialer := &net.Dialer{Timeout: timeout}
+	conn, err := dialer.Dial("tcp", target)
+	if err != nil {
+		return HostKeyInfo{}, friendlyDialError(target, err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+
+	if _, _, _, err := ssh.NewClientConn(conn, target, cfg); err != nil {
+		if found.Fingerprint != "" {
+			return found, nil
+		}
+		return HostKeyInfo{}, friendlyDialError(target, err)
+	}
+	return found, errors.New("server accepted the probe without presenting a host key")
+}
+
 func authMethods(p Params) ([]ssh.AuthMethod, error) {
 	switch p.AuthType {
 	case "key":

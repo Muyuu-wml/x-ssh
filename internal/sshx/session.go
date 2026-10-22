@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -25,8 +26,10 @@ type Session struct {
 	out      io.Reader
 	outClose *io.PipeWriter
 
-	mu     sync.Mutex
-	closed bool
+	mu        sync.Mutex
+	closed    bool
+	deadBy    string        // set when the keepalive loop kills the connection
+	stopAlive chan struct{} // closes when the session ends, stopping keepalive
 }
 
 // Start opens a shell with a PTY. It does not start reading output yet: call Run
@@ -71,15 +74,16 @@ func Start(client *ssh.Client, id, hostID, title, address string, cols, rows int
 	}
 
 	s := &Session{
-		ID:       id,
-		HostID:   hostID,
-		Title:    title,
-		Address:  address,
-		client:   client,
-		session:  sess,
-		stdin:    stdin,
-		out:      pr,
-		outClose: pw,
+		ID:        id,
+		HostID:    hostID,
+		Title:     title,
+		Address:   address,
+		client:    client,
+		session:   sess,
+		stdin:     stdin,
+		out:       pr,
+		outClose:  pw,
+		stopAlive: make(chan struct{}),
 	}
 
 	return s, nil
@@ -91,7 +95,16 @@ func Start(client *ssh.Client, id, hostID, title, address string, cols, rows int
 func (s *Session) Run(onData func([]byte), onClose func(error)) {
 	go s.pump(onData)
 	go s.wait(onClose)
+	go s.keepalive()
 }
+
+// keepaliveInterval and keepaliveTimeout bound how long a silently vanished peer
+// can keep a tab looking alive. The reply deadline stays well under the interval
+// so a single stuck request cannot overlap the next tick.
+const (
+	keepaliveInterval = 30 * time.Second
+	keepaliveTimeout  = 15 * time.Second
+)
 
 func (s *Session) pump(onData func([]byte)) {
 	buf := make([]byte, 32*1024)
@@ -108,6 +121,56 @@ func (s *Session) pump(onData func([]byte)) {
 	}
 }
 
+// keepalive asks the server for a reply every interval. A dropped network
+// typically leaves the socket open, so without this the tab would sit at
+// "connected" forever after the server or route disappears. A failed or
+// unanswered request closes the connection; the existing wait path then reports
+// the session as an unexpected close, which is what the UI turns into a notice.
+func (s *Session) keepalive() {
+	ticker := time.NewTicker(keepaliveInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopAlive:
+			return
+		case <-ticker.C:
+		}
+
+		reply := make(chan bool, 1)
+		go func() {
+			_, _, err := s.client.SendRequest("keepalive@openssh.com", true, nil)
+			reply <- err == nil
+		}()
+
+		select {
+		case <-s.stopAlive:
+			return
+		case <-time.After(keepaliveTimeout):
+			s.markDead("服务器长时间无响应，连接已断开")
+			return
+		case alive := <-reply:
+			if !alive {
+				s.markDead("连接已断开")
+				return
+			}
+		}
+	}
+}
+
+// markDead records why the connection is being torn down and closes it so the
+// wait goroutine can report the closure.
+func (s *Session) markDead(reason string) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.deadBy = reason
+	s.mu.Unlock()
+	_ = s.client.Close()
+}
+
 func (s *Session) wait(onClose func(error)) {
 	err := s.session.Wait()
 	_ = s.outClose.Close()
@@ -119,10 +182,16 @@ func (s *Session) wait(onClose func(error)) {
 	s.mu.Lock()
 	userClosed := s.closed
 	s.closed = true
+	deadBy := s.deadBy
 	s.mu.Unlock()
+	close(s.stopAlive)
 
 	if userClosed {
 		err = nil
+	} else if deadBy != "" {
+		// The keepalive decided the link was gone; its reason is clearer than
+		// the "use of closed network connection" error from closing the socket.
+		err = errors.New(deadBy)
 	}
 	if onClose != nil {
 		onClose(err)

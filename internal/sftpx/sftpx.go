@@ -5,6 +5,7 @@
 package sftpx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -37,8 +38,9 @@ type Client struct {
 	HostID string
 	Title  string
 
-	ssh  *ssh.Client
-	sftp *sftp.Client
+	ssh   *ssh.Client
+	sftp  *sftp.Client
+	queue *taskQueue
 }
 
 // Manager keeps browser sessions addressable by id.
@@ -46,11 +48,14 @@ type Manager struct {
 	mu      sync.RWMutex
 	kh      *sshx.KnownHosts
 	clients map[string]*Client
+
+	onTask func(TaskView)
 }
 
-// NewManager creates an SFTP session registry.
-func NewManager(kh *sshx.KnownHosts) *Manager {
-	return &Manager{kh: kh, clients: map[string]*Client{}}
+// NewManager creates an SFTP session registry. onTask receives every transfer
+// update; it may be nil in tests.
+func NewManager(kh *sshx.KnownHosts, onTask func(TaskView)) *Manager {
+	return &Manager{kh: kh, clients: map[string]*Client{}, onTask: onTask}
 }
 
 // Open dials the host and starts an SFTP subsystem.
@@ -67,10 +72,24 @@ func (m *Manager) Open(p sshx.Params) (string, error) {
 	}
 
 	id := uuid.NewString()
+	c := &Client{ID: id, HostID: p.HostID, Title: p.Title(), ssh: client, sftp: sc}
+	c.queue = newTaskQueue(m.notifyTask, func(ctx context.Context, kind, source, target string, progress Progress) error {
+		if kind == "upload" {
+			return c.Upload(ctx, source, target, progress)
+		}
+		return c.Download(ctx, source, target, progress)
+	})
+
 	m.mu.Lock()
-	m.clients[id] = &Client{ID: id, HostID: p.HostID, Title: p.Title(), ssh: client, sftp: sc}
+	m.clients[id] = c
 	m.mu.Unlock()
 	return id, nil
+}
+
+func (m *Manager) notifyTask(v TaskView) {
+	if m.onTask != nil {
+		m.onTask(v)
+	}
 }
 
 // Get resolves a browser session.
@@ -82,6 +101,67 @@ func (m *Manager) Get(id string) (*Client, error) {
 		return nil, ErrNoClient
 	}
 	return c, nil
+}
+
+// Enqueue registers a transfer on the session's serial queue and returns its
+// initial snapshot. name is the entry the user picked, shown in the UI.
+func (m *Manager) Enqueue(sessionID, kind, name, source, target string) (TaskView, error) {
+	c, err := m.Get(sessionID)
+	if err != nil {
+		return TaskView{}, err
+	}
+	return c.queue.enqueue(sessionID, kind, name, source, target), nil
+}
+
+// CancelTask stops a queued or running transfer.
+func (m *Manager) CancelTask(sessionID, taskID string) error {
+	c, err := m.Get(sessionID)
+	if err != nil {
+		return err
+	}
+	return c.queue.cancelTask(taskID)
+}
+
+// RetryTask re-queues a failed or canceled transfer.
+func (m *Manager) RetryTask(sessionID, taskID string) error {
+	c, err := m.Get(sessionID)
+	if err != nil {
+		return err
+	}
+	return c.queue.retryTask(taskID)
+}
+
+// ClearTasks removes finished transfers. An empty sessionID clears every
+// session's finished tasks. It returns the removed task ids so the UI can drop
+// them from its list.
+func (m *Manager) ClearTasks(sessionID string) ([]string, error) {
+	if sessionID != "" {
+		c, err := m.Get(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		return c.queue.clearFinished(), nil
+	}
+	m.mu.RLock()
+	all := make([]*Client, 0, len(m.clients))
+	for _, c := range m.clients {
+		all = append(all, c)
+	}
+	m.mu.RUnlock()
+	var removed []string
+	for _, c := range all {
+		removed = append(removed, c.queue.clearFinished()...)
+	}
+	return removed, nil
+}
+
+// Tasks snapshots a session's transfer list in submission order.
+func (m *Manager) Tasks(sessionID string) ([]TaskView, error) {
+	c, err := m.Get(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return c.queue.list(), nil
 }
 
 // Close ends a browser session.
@@ -112,8 +192,12 @@ func (m *Manager) CloseAll() {
 	}
 }
 
-// Close shuts the SFTP subsystem and the underlying SSH connection.
+// Close shuts the SFTP subsystem and the underlying SSH connection. Pending
+// transfers are canceled first so their goroutines do not hang on a dead link.
 func (c *Client) Close() error {
+	if c.queue != nil {
+		c.queue.close()
+	}
 	if c.sftp != nil {
 		_ = c.sftp.Close()
 	}
@@ -328,7 +412,10 @@ func (c *Client) Rename(oldPath, newPath string) error {
 }
 
 // Upload copies a local file or directory into remoteDir.
-func (c *Client) Upload(localPath, remoteDir string, progress Progress) error {
+func (c *Client) Upload(ctx context.Context, localPath, remoteDir string, progress Progress) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fi, err := os.Stat(localPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", localPath, err)
@@ -336,11 +423,14 @@ func (c *Client) Upload(localPath, remoteDir string, progress Progress) error {
 	remoteDir = c.Resolve(remoteDir)
 
 	if !fi.IsDir() {
-		return c.uploadFile(localPath, path.Join(remoteDir, fi.Name()), fi.Size(), progress)
+		return c.uploadFile(ctx, localPath, path.Join(remoteDir, fi.Name()), fi.Size(), progress)
 	}
 
 	root := path.Join(remoteDir, fi.Name())
 	return filepath.Walk(localPath, func(p string, info os.FileInfo, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			// Windows system files such as swapfile.sys can be visible inside a
 			// browsed drive but remain locked by the OS. Skip an inaccessible
@@ -358,11 +448,11 @@ func (c *Client) Upload(localPath, remoteDir string, progress Progress) error {
 		if info.IsDir() {
 			return c.sftp.MkdirAll(remote)
 		}
-		return c.uploadFile(p, remote, info.Size(), progress)
+		return c.uploadFile(ctx, p, remote, info.Size(), progress)
 	})
 }
 
-func (c *Client) uploadFile(localPath, remotePath string, size int64, progress Progress) error {
+func (c *Client) uploadFile(ctx context.Context, localPath, remotePath string, size int64, progress Progress) error {
 	src, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", localPath, err)
@@ -381,7 +471,7 @@ func (c *Client) uploadFile(localPath, remotePath string, size int64, progress P
 		return fmt.Errorf("create %s: %w", tmp, err)
 	}
 
-	_, copyErr := copyWithProgress(dst, src, progress, path.Base(remotePath), size)
+	_, copyErr := copyWithProgress(ctx, dst, src, progress, path.Base(remotePath), size)
 	closeErr := dst.Close()
 	if copyErr != nil {
 		_ = c.sftp.Remove(tmp)
@@ -434,7 +524,10 @@ func (c *Client) publishFile(tmp, target string) error {
 }
 
 // Download copies a remote file or directory into localDir.
-func (c *Client) Download(remotePath, localDir string, progress Progress) error {
+func (c *Client) Download(ctx context.Context, remotePath, localDir string, progress Progress) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	remotePath = c.Resolve(remotePath)
 	fi, err := c.sftp.Stat(remotePath)
 	if err != nil {
@@ -442,13 +535,16 @@ func (c *Client) Download(remotePath, localDir string, progress Progress) error 
 	}
 
 	if !fi.IsDir() {
-		return c.downloadFile(remotePath, filepath.Join(localDir, path.Base(remotePath)), fi.Size(), progress)
+		return c.downloadFile(ctx, remotePath, filepath.Join(localDir, path.Base(remotePath)), fi.Size(), progress)
 	}
 
 	base := path.Base(remotePath)
 	root := filepath.Join(localDir, base)
 	walker := c.sftp.Walk(remotePath)
 	for walker.Step() {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err := walker.Err(); err != nil {
 			return err
 		}
@@ -470,7 +566,7 @@ func (c *Client) Download(remotePath, localDir string, progress Progress) error 
 			}
 			continue
 		}
-		if err := c.downloadFile(walker.Path(), local, walker.Stat().Size(), progress); err != nil {
+		if err := c.downloadFile(ctx, walker.Path(), local, walker.Stat().Size(), progress); err != nil {
 			return err
 		}
 	}
@@ -491,7 +587,7 @@ func withinDir(root, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func (c *Client) downloadFile(remotePath, localPath string, size int64, progress Progress) error {
+func (c *Client) downloadFile(ctx context.Context, remotePath, localPath string, size int64, progress Progress) error {
 	src, err := c.sftp.Open(remotePath)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", remotePath, err)
@@ -510,7 +606,7 @@ func (c *Client) downloadFile(remotePath, localPath string, size int64, progress
 		return fmt.Errorf("create %s: %w", tmp, err)
 	}
 
-	_, copyErr := copyWithProgress(dst, src, progress, path.Base(remotePath), size)
+	_, copyErr := copyWithProgress(ctx, dst, src, progress, path.Base(remotePath), size)
 	closeErr := dst.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmp)
@@ -527,12 +623,15 @@ func (c *Client) downloadFile(remotePath, localPath string, size int64, progress
 	return nil
 }
 
-func copyWithProgress(dst io.Writer, src io.Reader, progress Progress, name string, total int64) (int64, error) {
+func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, progress Progress, name string, total int64) (int64, error) {
 	buf := make([]byte, 128*1024)
 	var written int64
 	lastReport := time.Now()
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
 		n, readErr := src.Read(buf)
 		if n > 0 {
 			if _, err := dst.Write(buf[:n]); err != nil {

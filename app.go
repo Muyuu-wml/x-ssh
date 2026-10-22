@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"x-ssh/internal/backup"
 	"x-ssh/internal/localfs"
 	"x-ssh/internal/model"
 	"x-ssh/internal/sftpx"
@@ -22,8 +24,14 @@ import (
 const (
 	eventSSHData    = "ssh:data"
 	eventSSHState   = "ssh:state"
-	eventSFTPStatus = "sftp:status"
+	eventSFTPTask   = "sftp:task"
+	eventHostDistro = "host:distro"
 )
+
+// unknownHostKeyPrefix marks the error returned when a host has no approved
+// fingerprint yet. The rest of the string is "host:port|SHA256:...|key-type";
+// the frontend turns it into the first-connect dialog.
+const unknownHostKeyPrefix = "UNKNOWN_HOSTKEY|"
 
 // App is the Wails bound API surface. Every exported method becomes callable
 // from JavaScript as window.go.main.App.<Method>.
@@ -90,7 +98,19 @@ func (a *App) startup(ctx context.Context) {
 		},
 	)
 
-	a.sftp = sftpx.NewManager(kh)
+	a.sftp = sftpx.NewManager(kh, func(v sftpx.TaskView) {
+		runtime.EventsEmit(a.ctx, eventSFTPTask, v)
+	})
+
+	a.ssh.SetDistroHandler(func(hostID, distro string) {
+		if err := a.profile.SetHostDistro(hostID, distro); err != nil {
+			return
+		}
+		runtime.EventsEmit(a.ctx, eventHostDistro, map[string]string{
+			"hostId": hostID,
+			"distro": distro,
+		})
+	})
 }
 
 // shutdown releases every connection cleanly.
@@ -196,6 +216,9 @@ func (a *App) OpenSession(hostID string, cols, rows int) (sshx.Info, error) {
 	if err != nil {
 		return sshx.Info{}, fmt.Errorf("host not found: %w", err)
 	}
+	if err := a.ensureHostTrusted(host); err != nil {
+		return sshx.Info{}, err
+	}
 
 	info, err := a.ssh.Open(paramsFor(host), cols, rows)
 	if err != nil {
@@ -203,6 +226,25 @@ func (a *App) OpenSession(hostID string, cols, rows int) (sshx.Info, error) {
 	}
 	_ = a.profile.TouchHost(hostID)
 	return info, nil
+}
+
+// ensureHostTrusted checks that the host key was approved before a real
+// session is opened.
+//
+// The handshake has a deadline, so it cannot wait for a human: an unapproved
+// host yields a marker error describing the key, the UI asks the user, calls
+// TrustHostKey, and retries the open. Nothing is emitted until then, so no
+// phantom "connecting" session appears.
+func (a *App) ensureHostTrusted(host model.Host) error {
+	target, _ := paramsFor(host).Endpoint()
+	if _, ok := a.known.Fingerprint(target); ok {
+		return nil
+	}
+	info, err := sshx.ProbeHostKey(paramsFor(host), 10*time.Second)
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%s%s|%s|%s", unknownHostKeyPrefix, target, info.Fingerprint, info.Algorithm)
 }
 
 // WriteSession forwards keyboard input. data is base64 encoded so that binary
@@ -246,29 +288,14 @@ func paramsFor(h model.Host) sshx.Params {
 
 // ------------------------------------------------------------------ sftp
 
-// transferResult is emitted when a queued transfer finishes.
-type transferResult struct {
-	SessionID string `json:"sessionId"`
-	Kind      string `json:"kind"` // upload | download
-	Name      string `json:"name"`
-	OK        bool   `json:"ok"`
-	Error     string `json:"error,omitempty"`
-}
-
-// progressEvent reports transfer advancement to the UI.
-type progressEvent struct {
-	SessionID string `json:"sessionId"`
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Done      int64  `json:"done"`
-	Total     int64  `json:"total"`
-}
-
 // SftpOpen starts a file browser session for a saved host.
 func (a *App) SftpOpen(hostID string) (string, error) {
 	host, err := a.profile.GetHost(hostID)
 	if err != nil {
 		return "", fmt.Errorf("host not found: %w", err)
+	}
+	if err := a.ensureHostTrusted(host); err != nil {
+		return "", err
 	}
 	return a.sftp.Open(paramsFor(host))
 }
@@ -333,58 +360,36 @@ func (a *App) SftpRename(sessionID, oldPath, newPath string) error {
 }
 
 // SftpUpload queues a local file or folder to be sent to the host. It returns
-// immediately; completion arrives via the sftp status event.
-func (a *App) SftpUpload(sessionID, localPath, remoteDir string) error {
-	c, err := a.sftp.Get(sessionID)
-	if err != nil {
-		return err
-	}
-	go func() {
-		progress := func(name string, done, total int64) {
-			runtime.EventsEmit(a.ctx, eventSFTPStatus, progressEvent{
-				SessionID: sessionID, Kind: "upload", Name: name, Done: done, Total: total,
-			})
-		}
-		err := c.Upload(localPath, remoteDir, progress)
-		result := transferResult{
-			SessionID: sessionID,
-			Kind:      "upload",
-			Name:      filepath.Base(localPath),
-			OK:        err == nil,
-		}
-		if err != nil {
-			result.Error = err.Error()
-		}
-		runtime.EventsEmit(a.ctx, eventSFTPStatus, result)
-	}()
-	return nil
+// the task snapshot immediately; progress and completion arrive as sftp:task
+// events.
+func (a *App) SftpUpload(sessionID, localPath, remoteDir string) (sftpx.TaskView, error) {
+	return a.sftp.Enqueue(sessionID, "upload", filepath.Base(localPath), localPath, remoteDir)
 }
 
 // SftpDownload queues a remote file or folder to be saved locally.
-func (a *App) SftpDownload(sessionID, remotePath, localDir string) error {
-	c, err := a.sftp.Get(sessionID)
-	if err != nil {
-		return err
-	}
-	go func() {
-		progress := func(name string, done, total int64) {
-			runtime.EventsEmit(a.ctx, eventSFTPStatus, progressEvent{
-				SessionID: sessionID, Kind: "download", Name: name, Done: done, Total: total,
-			})
-		}
-		err := c.Download(remotePath, localDir, progress)
-		result := transferResult{
-			SessionID: sessionID,
-			Kind:      "download",
-			Name:      pathBase(remotePath),
-			OK:        err == nil,
-		}
-		if err != nil {
-			result.Error = err.Error()
-		}
-		runtime.EventsEmit(a.ctx, eventSFTPStatus, result)
-	}()
-	return nil
+func (a *App) SftpDownload(sessionID, remotePath, localDir string) (sftpx.TaskView, error) {
+	return a.sftp.Enqueue(sessionID, "download", pathBase(remotePath), remotePath, localDir)
+}
+
+// SftpCancelTask stops a queued or running transfer.
+func (a *App) SftpCancelTask(sessionID, taskID string) error {
+	return a.sftp.CancelTask(sessionID, taskID)
+}
+
+// SftpRetryTask re-queues a failed or canceled transfer.
+func (a *App) SftpRetryTask(sessionID, taskID string) error {
+	return a.sftp.RetryTask(sessionID, taskID)
+}
+
+// SftpClearTasks removes finished transfers from the queue. An empty sessionID
+// clears all sessions. It returns the removed task ids.
+func (a *App) SftpClearTasks(sessionID string) ([]string, error) {
+	return a.sftp.ClearTasks(sessionID)
+}
+
+// SftpTasks lists a session's transfers in submission order.
+func (a *App) SftpTasks(sessionID string) ([]sftpx.TaskView, error) {
+	return a.sftp.Tasks(sessionID)
 }
 
 // SftpClose ends a browser session.
@@ -465,11 +470,80 @@ func (a *App) ImportPrivateKeyFile() (string, error) {
 	return string(raw), nil
 }
 
+// ---------------------------------------------------------------- backup
+
+// exportFileExt is appended by the save dialog so the file is recognisable.
+const exportFileExt = ".xsshbackup"
+
+// ExportHosts encrypts the whole profile with the given password and writes it
+// to a file the user picks. Empty path means the user cancelled.
+func (a *App) ExportHosts(password string) (string, error) {
+	text, err := backup.Export(a.profile.Snapshot(), password)
+	if err != nil {
+		return "", err
+	}
+
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "导出主机配置",
+		DefaultFilename: fmt.Sprintf("x-ssh-%s%s", time.Now().Format("20060102"), exportFileExt),
+		Filters: []runtime.FileFilter{
+			{DisplayName: "x-ssh 备份", Pattern: "*" + exportFileExt},
+		},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if !strings.HasSuffix(strings.ToLower(path), exportFileExt) {
+		path += exportFileExt
+	}
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// ReadBackupFile opens a picker and returns the chosen backup as text, so the
+// import dialog can prefill the same textarea used for pasted content.
+func (a *App) ReadBackupFile() (string, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择备份文件",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "x-ssh 备份", Pattern: "*" + exportFileExt + ";*.json;*.txt"},
+			{DisplayName: "所有文件", Pattern: "*"},
+		},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return string(raw), nil
+}
+
+// ImportHosts decrypts backup text and merges it into the profile. It returns
+// what changed so the UI can report it.
+func (a *App) ImportHosts(text, password string) (store.ImportSummary, error) {
+	p, err := backup.Import(text, password)
+	if err != nil {
+		return store.ImportSummary{}, err
+	}
+	return a.profile.MergeImport(p)
+}
+
 // ------------------------------------------------------------ known hosts
 
 // ListKnownHosts returns the trusted host fingerprints.
 func (a *App) ListKnownHosts() map[string]string {
 	return a.known.All()
+}
+
+// TrustHostKey pins a fingerprint the user approved in the first-connect
+// dialog. The exact fingerprint shown to the user is stored, so a server that
+// swaps keys between the probe and the connect is rejected, not trusted.
+func (a *App) TrustHostKey(hostport, fingerprint string) error {
+	return a.known.Trust(hostport, fingerprint)
 }
 
 // ForgetHostKey drops a stored fingerprint so the host is trusted again.

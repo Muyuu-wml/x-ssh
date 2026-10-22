@@ -12,12 +12,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// KnownHosts implements trust-on-first-use host key verification.
+// KnownHosts implements pinned host key verification.
 //
-// The first time a host is seen its fingerprint is recorded. Later connections
-// must present the same key, otherwise the connection is refused. This is the
-// behaviour of OpenSSH with StrictHostKeyChecking=accept-new, and is a large
-// improvement over blindly ignoring host keys.
+// A key is only recorded after the user has approved it (see Trust), and every
+// later connection must present that same key. This is the behaviour of
+// OpenSSH with StrictHostKeyChecking=yes, with the approval step driven by the
+// first-connect dialog instead of the terminal.
 type KnownHosts struct {
 	mu      sync.Mutex
 	path    string
@@ -59,17 +59,33 @@ func (k *KnownHosts) Callback() ssh.HostKeyCallback {
 				hostname, known, fp,
 			)
 		}
-		// Persist first, then publish: a failed write must not leave the new
-		// fingerprint in memory, where a later connection would match against a
-		// value that was never saved.
-		next := k.copyLocked()
-		next[hostname] = fp
-		if err := k.saveLocked(next); err != nil {
-			return err
-		}
-		k.entries = next
-		return nil
+		// Unknown hosts are approved by the user in the app first; reaching
+		// this point means the check was bypassed or the entry was forgotten
+		// mid-connect, so refuse instead of silently trusting.
+		return fmt.Errorf("host key for %s is not trusted yet", hostname)
 	}
+}
+
+// Trust pins a fingerprint the user approved. It replaces any previous entry so
+// a deliberately rebuilt server can be re-approved from the dialog.
+func (k *KnownHosts) Trust(hostport, fingerprint string) error {
+	if hostport == "" || fingerprint == "" {
+		return errors.New("host and fingerprint are required")
+	}
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	// Persist first, then publish: a failed write must not leave the new
+	// fingerprint in memory, where a later connection would match against a
+	// value that was never saved.
+	next := k.copyLocked()
+	next[hostport] = fingerprint
+	if err := k.saveLocked(next); err != nil {
+		return err
+	}
+	k.entries = next
+	return nil
 }
 
 // Fingerprint returns the stored fingerprint for hostport, if any.

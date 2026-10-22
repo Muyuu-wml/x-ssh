@@ -18,16 +18,16 @@
  * ------------------------------------------------------------------------ */
 :root {
   /* surfaces —— 中性灰，不带蓝色调；蓝色只作强调 */
-  --bg: #17191d;
-  --glass-bg: #17191d;
-  --glass-sidebar: #1b1d21;
-  --sidebar-bg: #1b1d21;
-  --surface: #22252b;
-  --surface-2: #2b2e35;
-  --surface-3: #343942;
-  --border: #343942;
-  --border-soft: #2a2d34;
-  --scrim: rgba(8, 9, 11, 0.66);
+  --bg: #14161a;
+  --glass-bg: #14161a;
+  --glass-sidebar: #181b20;
+  --sidebar-bg: #181b20;
+  --surface: #1f2329;
+  --surface-2: #2a2f37;
+  --surface-3: #363c46;
+  --border: #363c46;
+  --border-soft: #272b32;
+  --scrim: rgba(6, 7, 9, 0.7);
 
   /* accent */
   --primary: #54a6ff;
@@ -35,7 +35,7 @@
   --primary-fill: #54a6ff; /* 浅蓝按钮配深色文字 */
   --primary-fill-hover: #83bfff;
   --on-accent: #101923;
-  --selected: #2e333b;
+  --selected: color-mix(in srgb, #54a6ff 14%, #1f2329);
   /* 选中面上的次级文字：在 --selected 上仍需 ≥4.5:1 */
   --text-on-selected: #b0b6c2;
   /* 终端选中：半透明强调色，与界面的中性面区分开 */
@@ -172,6 +172,8 @@ body {
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
   background: var(--glass-sidebar);
+  /* 顶部一抹极淡的品牌色，打破整面纯灰 */
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--primary) 7%, transparent), transparent 140px);
   border-right: 1px solid var(--border-soft);
   display: flex;
   flex-direction: column;
@@ -301,7 +303,9 @@ body {
   box-shadow: inset 2px 0 0 var(--primary);
 }
 
-.host-row.active .host-avatar { color: var(--primary); }
+.host-row.active .host-avatar {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 50%, transparent);
+}
 
 /* 选中面比 --surface 亮，次级文字要跟着提亮才不至于掉到 4.5:1 以下 */
 .host-row.selected .host-addr {
@@ -486,6 +490,8 @@ body {
   max-width: 220px;
   min-height: 32px;
   flex: none;
+  position: relative;
+  overflow: hidden;
 }
 
 .tab:hover {
@@ -496,6 +502,17 @@ body {
   background: var(--surface-2);
   color: var(--text);
   border-color: var(--border);
+}
+
+/* 激活标签顶部的强调条 */
+.tab.active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--primary);
 }
 
 .tab-status {
@@ -578,41 +595,6 @@ body {
 }
 
 /* --------------------------------------------------------------- terminal */
-.term-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  min-height: 38px;
-  padding: var(--space-4) var(--space-16);
-  border-bottom: 1px solid var(--border-soft);
-  color: var(--text-dim);
-}
-
-.term-toolbar-title {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-}
-
-.term-toolbar-hint {
-  color: var(--text-faint);
-  font-size: var(--fs-xs);
-}
-
-.term-toolbar-spacer {
-  flex: 1;
-}
-
-.term-action {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-6);
-}
-
-.term-action .icon {
-  width: 14px;
-  height: 14px;
-}
-
 .term-host {
   flex: 1;
   min-height: 0;
@@ -839,35 +821,116 @@ body {
   font-size: var(--fs-md);
 }
 
-/* ----------------------------------------------------------- transfer bar */
-.transfer-bar {
+/* ------------------------------------------------------- transfer panel */
+.transfer-panel {
   position: fixed;
-  left: calc(var(--sidebar-w) + var(--space-12));
   right: var(--space-12);
   bottom: calc(var(--footer-h) + var(--space-12));
+  width: 460px;
+  max-width: calc(100vw - var(--sidebar-w) - 2 * var(--space-12));
+  max-height: 40vh;
   display: flex;
-  align-items: center;
-  gap: var(--space-12);
+  flex-direction: column;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--space-8) var(--space-12);
   box-shadow: var(--elev-1);
   z-index: 60;
+  overflow: hidden;
 }
 
-.transfer-name {
+.transfer-panel.collapsed .transfer-list {
+  display: none;
+}
+
+.transfer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border-bottom: 1px solid var(--border);
+}
+
+.transfer-panel.collapsed .transfer-head {
+  border-bottom: none;
+}
+
+.transfer-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
   font-size: var(--fs-sm);
-  min-width: 140px;
-  max-width: 40%;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.transfer-title [data-icon] {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+.transfer-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.transfer-panel.collapsed #transfer-collapse {
+  transform: rotate(180deg);
+}
+
+.transfer-list {
+  overflow-y: auto;
+  padding: var(--space-4) 0;
+}
+
+.transfer-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-12);
+}
+
+.transfer-row:hover {
+  background: var(--surface-3, var(--surface-2));
+}
+
+.transfer-row [data-icon] {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+}
+
+.transfer-main {
+  min-width: 0;
+}
+
+.transfer-name {
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: 3px;
+  font: var(--fs-xs) var(--mono);
+  color: var(--text-dim);
+}
+
 .transfer-track {
   flex: 1;
-  height: 5px;
+  height: 4px;
   background: var(--bg);
   border-radius: var(--radius-pill);
   overflow: hidden;
@@ -880,11 +943,24 @@ body {
   transition: width 0.12s linear;
 }
 
-.transfer-pct {
-  font: var(--fs-xs) var(--mono);
+.transfer-fill.failed {
+  background: var(--danger);
+}
+
+.transfer-state {
+  white-space: nowrap;
+}
+
+.transfer-row.done .transfer-state {
+  color: var(--success);
+}
+
+.transfer-row.failed .transfer-state {
+  color: var(--danger);
+}
+
+.transfer-row.canceled .transfer-state {
   color: var(--text-dim);
-  min-width: 46px;
-  text-align: right;
 }
 
 /* ------------------------------------------------------------------ modal */
@@ -907,7 +983,7 @@ body {
   max-height: calc(100vh - var(--titlebar-h) - 60px);
   display: flex;
   flex-direction: column;
-  box-shadow: var(--elev-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), var(--elev-2);
 }
 
 .modal-head {
@@ -1103,6 +1179,12 @@ input[type="radio"], input[type="checkbox"] {
   flex: none;
 }
 
+/* 发行版 logo 是填充图形，不吃描边；略放大以对齐描边图标的视觉重量 */
+.distro-logo {
+  width: 17px;
+  height: 17px;
+}
+
 [data-icon] {
   display: inline-flex;
   align-items: center;
@@ -1180,10 +1262,10 @@ kbd {
 .host-card.sort-drop-before::before { left: 0; right: auto; }
 .host-card.sort-drop-after::after { right: 0; left: auto; }
 .host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-8); }
-.host-card { display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: var(--space-12); padding: var(--space-12); min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: border-color var(--motion), background var(--motion); }
-.host-card:hover { border-color: var(--text-faint); }
+.host-card { display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: var(--space-12); padding: var(--space-12); min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); transition: border-color var(--motion), background var(--motion); }
+.host-card:hover { border-color: color-mix(in srgb, var(--text-faint) 45%, var(--border)); }
 .host-card-info { display: flex; flex-direction: column; min-width: 0; }
-.host-card-symbol { grid-row: 1 / 3; align-self: center; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); border-radius: var(--radius-md); }
+.host-card-symbol { grid-row: 1 / 3; align-self: center; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim); border-radius: var(--radius-md); }
 .host-card-symbol .icon { width: 18px; height: 18px; }
 .host-card-name { font-size: var(--fs-lg); font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .host-card-address { color: var(--text-dim); font: var(--fs-xs)/1.7 var(--mono); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: var(--space-4); }

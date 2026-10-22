@@ -80,6 +80,7 @@ export namespace model {
 	    privateKey: string;
 	    passphrase: string;
 	    tags: string[];
+	    distro?: string;
 	    // Go type: time
 	    createdAt: any;
 	    // Go type: time
@@ -105,6 +106,7 @@ export namespace model {
 	        this.privateKey = source["privateKey"];
 	        this.passphrase = source["passphrase"];
 	        this.tags = source["tags"];
+	        this.distro = source["distro"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	        this.lastUsedAt = this.convertValues(source["lastUsedAt"], null);
@@ -165,6 +167,39 @@ export namespace model {
 
 }
 
+export namespace sftpx {
+	
+	export class TaskView {
+	    id: string;
+	    sessionId: string;
+	    kind: string;
+	    name: string;
+	    file: string;
+	    status: string;
+	    done: number;
+	    total: number;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TaskView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.file = source["file"];
+	        this.status = source["status"];
+	        this.done = source["done"];
+	        this.total = source["total"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+
 export namespace sshx {
 	
 	export class Info {
@@ -187,6 +222,29 @@ export namespace sshx {
 	        this.address = source["address"];
 	        this.status = source["status"];
 	        this.error = source["error"];
+	    }
+	}
+
+}
+
+export namespace store {
+	
+	export class ImportSummary {
+	    hostsAdded: number;
+	    hostsUpdated: number;
+	    groupsAdded: number;
+	    groupsUpdated: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hostsAdded = source["hostsAdded"];
+	        this.hostsUpdated = source["hostsUpdated"];
+	        this.groupsAdded = source["groupsAdded"];
+	        this.groupsUpdated = source["groupsUpdated"];
 	    }
 	}
 

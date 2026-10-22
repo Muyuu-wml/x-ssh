@@ -31,9 +31,10 @@ type Manager struct {
 	sessions map[string]*Session
 	closed   bool
 
-	onOpen  func(Info)
-	onData  func(sessionID string, data []byte)
-	onClose func(sessionID, reason string)
+	onOpen   func(Info)
+	onData   func(sessionID string, data []byte)
+	onClose  func(sessionID, reason string)
+	onDistro func(hostID, distro string)
 }
 
 // NewManager creates a manager using the supplied host key policy.
@@ -50,6 +51,12 @@ func (m *Manager) SetHandlers(
 	m.onOpen = onOpen
 	m.onData = onData
 	m.onClose = onClose
+}
+
+// SetDistroHandler wires the callback invoked when the remote OS of a freshly
+// connected host has been detected.
+func (m *Manager) SetDistroHandler(onDistro func(hostID, distro string)) {
+	m.onDistro = onDistro
 }
 
 // Open dials the host and starts an interactive shell.
@@ -129,6 +136,16 @@ func (m *Manager) Open(p Params, cols, rows int) (Info, error) {
 			}
 		},
 	)
+
+	// Detect the remote OS on a side channel, after the shell is up, so the
+	// user never waits on it. The client stays alive for the session lifetime.
+	if m.onDistro != nil && p.HostID != "" {
+		go func() {
+			if distro := DetectDistro(client, 10*time.Second); distro != "" {
+				m.onDistro(p.HostID, distro)
+			}
+		}()
+	}
 	return info, nil
 }
 

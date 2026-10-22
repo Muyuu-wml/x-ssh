@@ -54,7 +54,6 @@
         </header>
         <div class="session-bar hidden" id="session-bar">
           <div class="tabstrip" id="tabstrip"></div>
-          <button class="icon-btn" id="btn-find-host" title="搜索主机（Ctrl F）" aria-label="搜索主机" data-icon="plus"></button>
         </div>
         <div class="panes" id="panes"></div>
 
@@ -77,12 +76,16 @@
       </main>
     </div>
 
-    <!-- ------------------------------------------------------- transfer bar -->
-    <div id="transfer-bar" class="transfer-bar hidden">
-      <span class="transfer-name" id="transfer-name"></span>
-      <div class="transfer-track"><div class="transfer-fill" id="transfer-fill"></div></div>
-      <span class="transfer-pct" id="transfer-pct"></span>
-      <button class="icon-btn" id="transfer-hide" title="隐藏" aria-label="隐藏传输进度" data-icon="close"></button>
+    <!-- --------------------------------------------------- transfer panel -->
+    <div id="transfer-panel" class="transfer-panel hidden">
+      <div class="transfer-head">
+        <span class="transfer-title"><span data-icon="transfer"></span>传输</span>
+        <span class="transfer-summary" id="transfer-summary"></span>
+        <button class="btn btn-sm" id="transfer-clear">清除已完成</button>
+        <button class="icon-btn" id="transfer-collapse" title="收起列表" aria-label="收起传输列表" data-icon="chevron"></button>
+        <button class="icon-btn" id="transfer-hide" title="隐藏" aria-label="隐藏传输面板" data-icon="close"></button>
+      </div>
+      <div class="transfer-list" id="transfer-list"></div>
     </div>
 
     <!-- ------------------------------------------------------------ modals -->

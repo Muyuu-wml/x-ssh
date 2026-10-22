@@ -14,6 +14,10 @@ export function DeleteHost(arg1) {
   return window['go']['main']['App']['DeleteHost'](arg1);
 }
 
+export function ExportHosts(arg1) {
+  return window['go']['main']['App']['ExportHosts'](arg1);
+}
+
 export function ForgetHostKey(arg1) {
   return window['go']['main']['App']['ForgetHostKey'](arg1);
 }
@@ -24,6 +28,10 @@ export function GetAppInfo() {
 
 export function GetProfile() {
   return window['go']['main']['App']['GetProfile']();
+}
+
+export function ImportHosts(arg1, arg2) {
+  return window['go']['main']['App']['ImportHosts'](arg1, arg2);
 }
 
 export function ImportPrivateKeyFile() {
@@ -78,6 +86,10 @@ export function PickLocalFile() {
   return window['go']['main']['App']['PickLocalFile']();
 }
 
+export function ReadBackupFile() {
+  return window['go']['main']['App']['ReadBackupFile']();
+}
+
 export function ReorderGroups(arg1) {
   return window['go']['main']['App']['ReorderGroups'](arg1);
 }
@@ -96,6 +108,14 @@ export function SaveGroup(arg1) {
 
 export function SaveHost(arg1) {
   return window['go']['main']['App']['SaveHost'](arg1);
+}
+
+export function SftpCancelTask(arg1, arg2) {
+  return window['go']['main']['App']['SftpCancelTask'](arg1, arg2);
+}
+
+export function SftpClearTasks(arg1) {
+  return window['go']['main']['App']['SftpClearTasks'](arg1);
 }
 
 export function SftpClose(arg1) {
@@ -134,8 +154,20 @@ export function SftpRename(arg1, arg2, arg3) {
   return window['go']['main']['App']['SftpRename'](arg1, arg2, arg3);
 }
 
+export function SftpRetryTask(arg1, arg2) {
+  return window['go']['main']['App']['SftpRetryTask'](arg1, arg2);
+}
+
+export function SftpTasks(arg1) {
+  return window['go']['main']['App']['SftpTasks'](arg1);
+}
+
 export function SftpUpload(arg1, arg2, arg3) {
   return window['go']['main']['App']['SftpUpload'](arg1, arg2, arg3);
+}
+
+export function TrustHostKey(arg1, arg2) {
+  return window['go']['main']['App']['TrustHostKey'](arg1, arg2);
 }
 
 export function WriteSession(arg1, arg2) {

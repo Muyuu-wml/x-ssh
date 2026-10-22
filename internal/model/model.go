@@ -38,6 +38,10 @@ type Host struct {
 
 	Tags []string `json:"tags"`
 
+	// Distro is the remote OS identifier (os-release ID, e.g. "ubuntu"),
+	// detected after the first successful connection. Empty until then.
+	Distro string `json:"distro,omitempty"`
+
 	CreatedAt  time.Time  `json:"createdAt"`
 	UpdatedAt  time.Time  `json:"updatedAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`

@@ -115,6 +115,10 @@ func (s *Store) UpsertHost(in model.Host) (model.Host, error) {
 		}
 		in.CreatedAt = next.Hosts[idx].CreatedAt
 		in.LastUsedAt = next.Hosts[idx].LastUsedAt
+		// The editor never sends Distro; a detected value must survive edits.
+		if in.Distro == "" {
+			in.Distro = next.Hosts[idx].Distro
+		}
 		if in.GroupID == next.Hosts[idx].GroupID {
 			in.Order = next.Hosts[idx].Order
 			appendToGroup = false
@@ -140,6 +144,102 @@ func (s *Store) UpsertHost(in model.Host) (model.Host, error) {
 	}
 	s.profile = next
 	return in, nil
+}
+
+// ImportSummary reports what a backup merge changed.
+type ImportSummary struct {
+	HostsAdded    int `json:"hostsAdded"`
+	HostsUpdated  int `json:"hostsUpdated"`
+	GroupsAdded   int `json:"groupsAdded"`
+	GroupsUpdated int `json:"groupsUpdated"`
+}
+
+// MergeImport adds the profile read from a backup into the live profile.
+//
+// Records are matched by id, so re-importing the same file updates rather than
+// duplicates. Unknown ids are appended; secrets come from the backup and replace
+// whatever the local host had. The whole merge is validated and saved in one
+// commit, so a rejected import leaves the profile exactly as it was.
+func (s *Store) MergeImport(in model.Profile) (ImportSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := cloneProfile(s.profile)
+	var sum ImportSummary
+
+	seenGroups := make(map[string]bool, len(in.Groups))
+	for _, g := range in.Groups {
+		g.Name = strings.TrimSpace(g.Name)
+		if g.Name == "" || (g.ID != "" && seenGroups[g.ID]) {
+			continue
+		}
+		if g.ID == "" {
+			g.ID = uuid.NewString()
+		}
+		seenGroups[g.ID] = true
+		if idx := groupIndexIn(next, g.ID); idx >= 0 {
+			next.Groups[idx].Name = g.Name
+			sum.GroupsUpdated++
+		} else {
+			g.Order = len(next.Groups)
+			next.Groups = append(next.Groups, g)
+			sum.GroupsAdded++
+		}
+	}
+
+	seenHosts := make(map[string]bool, len(in.Hosts))
+	for _, h := range in.Hosts {
+		h.Address = strings.TrimSpace(h.Address)
+		h.Name = strings.TrimSpace(h.Name)
+		if h.Address == "" || (h.ID != "" && seenHosts[h.ID]) {
+			continue
+		}
+		if h.ID == "" {
+			h.ID = uuid.NewString()
+		}
+		seenHosts[h.ID] = true
+		if h.Port <= 0 || h.Port > 65535 {
+			h.Port = 22
+		}
+		if h.AuthType != model.AuthKey {
+			h.AuthType = model.AuthPassword
+		}
+		if h.Tags == nil {
+			h.Tags = []string{}
+		}
+		h.UpdatedAt = time.Now()
+
+		if idx := hostIndexIn(next, h.ID); idx >= 0 {
+			// Keep local bookkeeping the backup should not override.
+			h.CreatedAt = next.Hosts[idx].CreatedAt
+			h.LastUsedAt = next.Hosts[idx].LastUsedAt
+			next.Hosts[idx] = h
+			sum.HostsUpdated++
+		} else {
+			if h.CreatedAt.IsZero() {
+				h.CreatedAt = h.UpdatedAt
+			}
+			h.Order = 0
+			for _, host := range next.Hosts {
+				if host.GroupID == h.GroupID && host.Order >= h.Order {
+					h.Order = host.Order + 1
+				}
+			}
+			next.Hosts = append(next.Hosts, h)
+			sum.HostsAdded++
+		}
+	}
+
+	// Drop group references the import could not satisfy and flatten any cycle,
+	// then persist once. A validation failure aborts without touching state.
+	if err := normalizeLoaded(&next); err != nil {
+		return ImportSummary{}, err
+	}
+	if err := s.saveProfile(next); err != nil {
+		return ImportSummary{}, err
+	}
+	s.profile = next
+	return sum, nil
 }
 
 // ReorderHosts stores the complete presentation order within one group.
@@ -214,6 +314,33 @@ func (s *Store) TouchHost(id string) error {
 	}
 	now := time.Now()
 	next.Hosts[idx].LastUsedAt = &now
+	if err := s.saveProfile(next); err != nil {
+		return err
+	}
+	s.profile = next
+	return nil
+}
+
+// SetHostDistro records the detected remote OS. It is a no-op when the value
+// already matches, so a session opened against an unchanged host does not
+// rewrite the profile file on every connect.
+func (s *Store) SetHostDistro(id, distro string) error {
+	if distro == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := cloneProfile(s.profile)
+	idx := hostIndexIn(next, id)
+	if idx < 0 {
+		return ErrNotFound
+	}
+	if next.Hosts[idx].Distro == distro {
+		return nil
+	}
+	next.Hosts[idx].Distro = distro
 	if err := s.saveProfile(next); err != nil {
 		return err
 	}
