@@ -146,6 +146,10 @@ export function SftpParent(arg1, arg2) {
   return window['go']['main']['App']['SftpParent'](arg1, arg2);
 }
 
+export function SftpReadTextFile(arg1, arg2) {
+  return window['go']['main']['App']['SftpReadTextFile'](arg1, arg2);
+}
+
 export function SftpRemove(arg1, arg2, arg3) {
   return window['go']['main']['App']['SftpRemove'](arg1, arg2, arg3);
 }
@@ -164,6 +168,10 @@ export function SftpTasks(arg1) {
 
 export function SftpUpload(arg1, arg2, arg3) {
   return window['go']['main']['App']['SftpUpload'](arg1, arg2, arg3);
+}
+
+export function SftpWriteTextFile(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SftpWriteTextFile'](arg1, arg2, arg3);
 }
 
 export function TrustHostKey(arg1, arg2) {

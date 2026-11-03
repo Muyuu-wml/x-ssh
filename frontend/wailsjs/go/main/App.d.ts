@@ -78,6 +78,8 @@ export function SftpOpen(arg1:string):Promise<string>;
 
 export function SftpParent(arg1:string,arg2:string):Promise<string>;
 
+export function SftpReadTextFile(arg1:string,arg2:string):Promise<string>;
+
 export function SftpRemove(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function SftpRename(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -87,6 +89,8 @@ export function SftpRetryTask(arg1:string,arg2:string):Promise<void>;
 export function SftpTasks(arg1:string):Promise<Array<sftpx.TaskView>>;
 
 export function SftpUpload(arg1:string,arg2:string,arg3:string):Promise<sftpx.TaskView>;
+
+export function SftpWriteTextFile(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function TrustHostKey(arg1:string,arg2:string):Promise<void>;
 

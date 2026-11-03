@@ -22,6 +22,8 @@ import {
   SftpMkdir,
   SftpRemove,
   SftpRename,
+  SftpReadTextFile,
+  SftpWriteTextFile,
   SftpUpload,
   SftpDownload,
   SftpCancelTask,
@@ -436,10 +438,11 @@ function hostCardHTML(host, groupName) {
       <span class="host-card-name" title="${esc(name)}">${esc(name)}</span>
       <span class="host-card-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${esc(host.address)}:${host.port}</span>
     </div>
+    <div class="host-card-details"><span title="登录用户：${esc(host.username)}">用户 <strong>${esc(host.username)}</strong></span><span class="host-card-protocol">SSH</span></div>
     <div class="host-card-foot">
-      <button class="icon-btn" data-act="terminal" title="连接" aria-label="连接 ${esc(name)}">${icon("terminal")}</button>
-      <button class="icon-btn" data-act="sftp" title="文件" aria-label="管理 ${esc(name)} 的文件">${icon("folder")}</button>
-      <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑 ${esc(name)}">${icon("edit")}</button>
+      <button class="btn btn-sm btn-primary" data-act="terminal" aria-label="连接 ${esc(name)}">${icon("terminal")}连接</button>
+      <button class="btn btn-sm btn-files" data-act="sftp" aria-label="管理 ${esc(name)} 的文件">${icon("folder")}文件</button>
+      <button class="btn btn-sm btn-edit" data-act="edit" aria-label="编辑 ${esc(name)}">${icon("edit")}编辑</button>
     </div>
   </article>`;
 }
@@ -477,10 +480,10 @@ function renderDashboard() {
   addSection("", "未分组");
   $("#dashboard-count").textContent = hosts.length;
   $("#host-grid").innerHTML = hosts.length ? sections.join("") : `<div class="onboarding">
-    <div class="onboarding-symbol">${icon(state.filter ? "search" : "terminal")}</div>
+    <div class="onboarding-symbol">${icon(state.filter ? "search" : "server")}</div>
     <h3>${state.filter ? "未找到匹配的主机" : "添加主机，开始第一次连接"}</h3>
     <p>${state.filter ? "试试其他主机名、地址、用户名或标签。" : "保存服务器信息，即可在这里打开终端、管理远程文件。"}</p>
-    <button class="btn" data-act="${state.filter ? "clear-search" : "new-host"}">${icon(state.filter ? "close" : "plus")}${state.filter ? "清空搜索" : "添加第一台主机"}</button>
+    <button class="btn btn-primary" data-act="${state.filter ? "clear-search" : "new-host"}">${icon(state.filter ? "close" : "plus")}${state.filter ? "清空搜索" : "添加第一台主机"}</button>
   </div>`;
 }
 
@@ -503,7 +506,7 @@ function renderTabstrip() {
     .map((tab) => {
       const statusClass = tabStatusClass(tab);
       return `
-      <div class="tab ${tab.id === state.activeTabId ? "active" : ""}" tabindex="0" data-tab="${esc(tab.id)}" title="${esc(tab.title)} · ${tabStatusLabel(tab)}">
+      <div class="tab ${tab.id === state.activeTabId ? "active" : ""}" tabindex="0" data-tab="${esc(tab.id)}" data-kind="${esc(tab.kind)}" title="${esc(tab.title)} · ${tabStatusLabel(tab)}">
         <span class="tab-status ${statusClass}"></span>
         <span class="tab-title">${esc(tab.title)}</span>
         <span class="tab-kind" title="${tab.kind === "sftp" ? "SFTP 文件" : "SSH 终端"}">${icon(tab.kind === "sftp" ? "folder" : "terminal")}</span>
@@ -517,7 +520,7 @@ function renderTabstrip() {
   $("#empty").classList.toggle("hidden", Boolean(current));
   $("#panes").classList.toggle("hidden", !current);
   $("#btn-workspace").setAttribute("aria-pressed", String(!current));
-  $("#workspace-title").textContent = current ? current.title : "主机连接";
+  $("#workspace-title").textContent = current ? current.title : "主机管理";
   $("#workspace-context").textContent = current
     ? `${current.kind === "sftp" ? "文件传输" : "SSH 终端"} / ${tabStatusLabel(current)}`
     : "本地工作区";
@@ -823,8 +826,8 @@ function openSftpTab(host) {
     <div class="sftp-toolbar">
       <span class="sftp-target">SFTP · ${esc(host.username)}@${esc(host.address)}:${host.port}</span>
       <span class="spacer"></span>
-      <button class="icon-btn" data-act="upload" title="上传选中项到远端" aria-label="上传">${icon("upload")}</button>
-      <button class="icon-btn" data-act="download" title="下载选中项到本地" aria-label="下载">${icon("download")}</button>
+      <button class="btn btn-sm btn-primary" data-act="upload" title="上传选中项到远端">${icon("upload")}上传</button>
+      <button class="btn btn-sm btn-files" data-act="download" title="下载选中项到本地">${icon("download")}下载</button>
     </div>
     <div class="sftp-body">
       <section class="sftp-pane" data-side="local">
@@ -848,6 +851,7 @@ function openSftpTab(host) {
           <input class="sftp-path" data-path spellcheck="false" aria-label="远程路径" />
           <button class="icon-btn" data-act="mkdir" title="新建文件夹">${icon("folderPlus")}</button>
           <button class="icon-btn" data-act="rename" title="重命名">${icon("edit")}</button>
+          <button class="icon-btn" data-act="edit" title="编辑文本文件">${icon("file")}</button>
           <button class="icon-btn" data-act="delete" title="删除">${icon("trash")}</button>
         </div>
         <div class="sftp-columns"><span>名称</span><span class="c-size">大小</span><span class="c-date">修改时间</span></div>
@@ -944,6 +948,12 @@ function wireSftpPane(tab, side) {
         if (!sel) return toast("请先选择要重命名的文件或文件夹。", "info", 2500);
         renamePrompt(tab, side, sel);
         break;
+      case "edit":
+        if (side !== "remote") return toast("只能编辑远程文件，本地文件请用系统编辑器打开。", "info", 3000);
+        if (!sel) return toast("请先选择要编辑的文件。", "info", 2500);
+        if (sel.isDir) return toast("文件夹不能编辑。", "info", 2500);
+        openTextEditor(tab, sel);
+        break;
       case "delete":
         if (!sel) return toast("请先选择要删除的文件或文件夹。", "info", 2500);
         deleteConfirm(tab, side, sel);
@@ -972,14 +982,29 @@ function wireSftpPane(tab, side) {
     if (!row) return;
     const entry = tab[`${side}Entries`].find((x) => x.name === row.dataset.name);
     if (entry?.isDir) navigate(tab, side, entry.path);
+    // Double-click a remote file opens the built-in editor; that is the common
+    // "fix this config" path and saves a download/edit/upload round trip.
+    else if (entry && side === "remote") openTextEditor(tab, entry);
   });
 
   list.addEventListener("keydown", (e) => {
-    if (!e.target.matches(".file-row") || !["Enter", " "].includes(e.key)) return;
+    if (e.key === "Delete") {
+      // Use the pane's selection rather than the focused row: a click focuses
+      // the row, but the directory name is a button, so the two can differ.
+      const selected = tab[`${side}Sel`];
+      if (!selected || e.repeat) return;
+      e.preventDefault();
+      deleteConfirm(tab, side, selected);
+      return;
+    }
+
+    if (!e.target.matches(".file-row")) return;
+    if (!["Enter", " "].includes(e.key)) return;
     e.preventDefault();
     if (e.repeat) return;
-    const entry = tab[`${side}Entries`].find(x => x.name === e.target.dataset.name);
-    if (e.key === "Enter" && entry?.isDir) navigate(tab, side, entry.path);
+    const entry = tab[`${side}Entries`].find((x) => x.name === e.target.dataset.name);
+    if (!entry) return;
+    if (e.key === "Enter" && entry.isDir) navigate(tab, side, entry.path);
     else selectFile(entry);
   });
 
@@ -1066,6 +1091,23 @@ async function refreshSide(tab, side) {
   await navigate(tab, side, target);
 }
 
+// Coalesces directory refreshes. A folder upload reports one "done" per file,
+// and re-listing the destination on every one competes with the remaining
+// transfers for the same SFTP channel.
+const refreshTimers = new Map();
+
+function scheduleRefresh(tab, side) {
+  const key = `${tab.id}:${side}`;
+  clearTimeout(refreshTimers.get(key));
+  refreshTimers.set(
+    key,
+    setTimeout(() => {
+      refreshTimers.delete(key);
+      refreshSide(tab, side).catch(() => {});
+    }, 250)
+  );
+}
+
 async function parentOf(tab, side, current) {
   try {
     if (side === "remote" && !tab.sessionId) return;
@@ -1074,6 +1116,26 @@ async function parentOf(tab, side, current) {
   } catch (err) {
     fail(err, "打开上级目录失败");
   }
+}
+
+// File icon colours by extension group. Kept as a lookup rather than one CSS
+// rule per extension so new types are a one-line change.
+const fileKinds = {
+  code: ["js", "mjs", "cjs", "ts", "tsx", "jsx", "go", "php", "py", "rb", "java", "kt", "c", "h", "cpp", "hpp", "cs", "rs", "swift", "sh", "bash", "zsh", "fish", "ps1", "lua", "sql", "pl", "vue", "svelte"],
+  config: ["json", "yml", "yaml", "ini", "conf", "cnf", "toml", "env", "properties", "xml", "service", "cfg", "lock"],
+  doc: ["md", "markdown", "txt", "rst", "log", "csv"],
+  archive: ["zip", "gz", "tgz", "tar", "rar", "7z", "xz", "bz2", "zst", "iso"],
+  media: ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp", "mp4", "mkv", "mp3", "wav", "flac", "webm"],
+};
+
+function fileKindClass(name) {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return "";
+  const ext = name.slice(dot + 1).toLowerCase();
+  for (const [kind, list] of Object.entries(fileKinds)) {
+    if (list.includes(ext)) return `ext-${kind}`;
+  }
+  return "";
 }
 
 function renderFileList(tab, side) {
@@ -1101,7 +1163,7 @@ function renderFileList(tab, side) {
     .map(
       (entry) => `
         <div class="file-row ${entry.name === selected ? "selected" : ""}" data-name="${esc(entry.name)}" draggable="true" tabindex="0" title="${entry.isDir ? "单击名称或双击此行打开；拖到另一侧传输" : "拖到另一侧传输"}；单击选中">
-        <span class="file-icon ${entry.isDir ? "is-directory" : ""}">${icon(entry.isDir ? "folder" : "file")}</span>
+        <span class="file-icon ${entry.isDir ? "is-directory" : fileKindClass(entry.name)}">${icon(entry.isDir ? "folder" : "file")}</span>
         ${entry.isDir ? `<button class="file-name directory-open" data-open-dir title="打开 ${esc(entry.name)}" aria-label="打开目录 ${esc(entry.name)}">${esc(entry.name)}</button>` : `<span class="file-name" title="${esc(entry.name)}">${esc(entry.name)}</span>`}
         <span class="file-size">${entry.isDir ? "" : humanSize(entry.size)}</span>
         <span class="file-date">${esc(entry.modTime)}</span>
@@ -1152,6 +1214,119 @@ async function deleteConfirm(tab, side, entry) {
   } catch (err) {
     fail(err, "删除失败");
   }
+}
+
+/**
+ * Built-in remote text editor.
+ *
+ * Loads the file over SFTP, edits it in a textarea, and writes it back with
+ * Ctrl+S. Closing with unsaved changes asks first, so a stray Escape cannot
+ * throw away an edited config.
+ */
+async function openTextEditor(tab, entry) {
+  if (!tab.sessionId) return toast("SFTP 尚未连接。", "error");
+
+  let content;
+  try {
+    content = await SftpReadTextFile(tab.sessionId, entry.path);
+  } catch (err) {
+    return fail(err, `无法打开 ${entry.name}`);
+  }
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal editor-modal">
+      <div class="modal-head">
+        <span class="modal-title">${icon("file")}<span>${esc(entry.name)}</span></span>
+        <span class="editor-path" title="${esc(entry.path)}">${esc(entry.path)}</span>
+        <button class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${icon("close")}</button>
+      </div>
+      <textarea class="editor-text" spellcheck="false" wrap="off" aria-label="文件内容"></textarea>
+      <div class="modal-foot">
+        <span class="editor-status" data-status></span>
+        <span class="spacer"></span>
+        <button class="btn" data-act="cancel">取消</button>
+        <button class="btn btn-primary" data-act="save">保存</button>
+      </div>
+    </div>`;
+
+  const area = backdrop.querySelector(".editor-text");
+  const status = backdrop.querySelector("[data-status]");
+  const saveBtn = backdrop.querySelector('[data-act="save"]');
+  const cancelBtn = backdrop.querySelector('[data-act="cancel"]');
+
+  area.value = content;
+
+  let dirty = false;
+  let saving = false;
+
+  const updateStatus = () => {
+    const lines = area.value.split("\n").length;
+    status.textContent = `${dirty ? "已修改" : "未修改"} · ${lines} 行 · ${humanSize(area.value.length)}`;
+  };
+
+  const close = async () => {
+    if (saving) return;
+    if (dirty) {
+      const ok = await confirmDialog({
+        title: "放弃修改",
+        message: `“${entry.name}”还没有保存，确定关闭？`,
+        confirmLabel: "放弃修改",
+      });
+      if (!ok) return;
+    }
+    backdrop.remove();
+  };
+
+  const save = async () => {
+    if (saving) return;
+    saving = true;
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    status.textContent = "保存中…";
+    try {
+      await SftpWriteTextFile(tab.sessionId, entry.path, area.value);
+      saving = false;
+      dirty = false;
+      backdrop.remove();
+      toast(`已保存 ${entry.name}`, "success", 3000);
+      refreshSide(tab, "remote").catch(() => {});
+    } catch (err) {
+      // Keep the editor and the text: the session may have dropped and the user
+      // still needs a chance to retry or copy the content out.
+      saving = false;
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+      updateStatus();
+      fail(err, "保存失败");
+    }
+  };
+
+  area.addEventListener("input", () => {
+    dirty = true;
+    updateStatus();
+  });
+  backdrop.addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "save") save();
+    else if (act === "cancel" || act === "close") close();
+    else if (e.target === backdrop) close();
+  });
+  backdrop.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      save();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  });
+
+  $("#modal-root").appendChild(backdrop);
+  updateStatus();
+  area.focus();
 }
 
 async function doUpload(tab, entry = tab.localSel) {
@@ -1948,11 +2123,15 @@ function wireBackendEvents() {
     const prev = state.transfers.get(task.id);
     state.transfers.set(task.id, task);
 
+    const wasActive = prev ? prev.status === "queued" || prev.status === "running" : false;
+    const isActive = task.status === "queued" || task.status === "running";
+    if (wasActive !== isActive) transferActive += isActive ? 1 : -1;
+
     // Refresh the destination pane once when a transfer lands.
     if (task.status === "done" && prev?.status !== "done") {
       const tab = state.tabs.find((t) => t.sessionId === task.sessionId);
       // The tab may have closed while the transfer was finishing.
-      if (tab) refreshSide(tab, task.kind === "upload" ? "remote" : "local").catch(() => {});
+      if (tab) scheduleRefresh(tab, task.kind === "upload" ? "remote" : "local");
     }
     if (task.status === "failed" && prev?.status !== "failed") {
       toast(`${task.kind === "upload" ? "上传" : "下载"}失败：${task.name} — ${task.error}`, "error", 7000);
@@ -1961,7 +2140,8 @@ function wireBackendEvents() {
     // Only a new task re-opens the panel; hiding it must stick while the
     // remaining transfers keep reporting progress.
     if (!prev) showTransferPanel();
-    renderTransfers();
+    upsertTransferRow(task);
+    updateTransferSummary();
   });
 
   EventsOn("host:distro", (payload) => {
@@ -2021,38 +2201,96 @@ function transferMeta(task) {
   return transferStates[task.status] || task.status;
 }
 
-function renderTransfers() {
-  const tasks = [...state.transfers.values()];
-  const active = tasks.filter((t) => t.status === "queued" || t.status === "running").length;
-  $("#transfer-summary").textContent = active
-    ? `${active} 项进行中 · 共 ${tasks.length} 项`
-    : tasks.length
-      ? `共 ${tasks.length} 项`
-      : "暂无传输任务";
+function transferPercent(task) {
+  if (task.total > 0) return Math.min(100, (task.done / task.total) * 100);
+  return task.status === "done" ? 100 : 0;
+}
 
-  $("#transfer-list").innerHTML = tasks
-    .map((task) => {
-      const pct = task.total > 0 ? Math.min(100, (task.done / task.total) * 100) : task.status === "done" ? 100 : 0;
-      const actions =
-        task.status === "queued" || task.status === "running"
-          ? `<button class="icon-btn" data-act="cancel" data-task="${esc(task.id)}" title="取消">${icon("close")}</button>`
-          : task.status === "done"
-            ? ""
-            : `<button class="icon-btn" data-act="retry" data-task="${esc(task.id)}" title="重试">${icon("refresh")}</button>`;
-      return `
-        <div class="transfer-row ${esc(task.status)}">
-          ${icon(task.kind === "upload" ? "upload" : "download")}
-          <div class="transfer-main">
-            <div class="transfer-name" title="${esc(task.name)}">${esc(task.name)}</div>
-            <div class="transfer-meta">
-              <div class="transfer-track"><div class="transfer-fill${task.status === "failed" ? " failed" : ""}" style="width:${pct}%"></div></div>
-              <span class="transfer-state" title="${esc(transferMeta(task))}">${esc(transferMeta(task))}</span>
-            </div>
-          </div>
-          <span>${actions}</span>
-        </div>`;
-    })
-    .join("");
+// Rows are keyed by task id so one progress tick updates one row instead of
+// rebuilding the list. Rebuilding was O(tasks) per event, so an upload got
+// slower with every finished transfer; clearing finished tasks "fixed" it by
+// shrinking that list.
+const transferRows = new Map();
+// Active tasks are counted incrementally: every progress event must stay O(1),
+// otherwise the cost grows with the number of finished transfers.
+let transferActive = 0;
+
+function transferRowHTML(task) {
+  const actions =
+    task.status === "queued" || task.status === "running"
+      ? `<button class="icon-btn" data-act="cancel" data-task="${esc(task.id)}" title="取消">${icon("close")}</button>`
+      : task.status === "done"
+        ? ""
+        : `<button class="icon-btn" data-act="retry" data-task="${esc(task.id)}" title="重试">${icon("refresh")}</button>`;
+  const meta = transferMeta(task);
+  return `
+    <div class="transfer-row ${esc(task.status)}" data-status="${esc(task.status)}" data-kind="${esc(task.kind)}">
+      ${icon(task.kind === "upload" ? "upload" : "download")}
+      <div class="transfer-main">
+        <div class="transfer-name" title="${esc(task.name)}">${esc(task.name)}</div>
+        <div class="transfer-meta">
+          <div class="transfer-track"><div class="transfer-fill${task.status === "failed" ? " failed" : ""}" style="width:${transferPercent(task)}%"></div></div>
+          <span class="transfer-state" title="${esc(meta)}">${esc(meta)}</span>
+        </div>
+      </div>
+      <span>${actions}</span>
+    </div>`;
+}
+
+function makeTransferRow(task) {
+  const template = document.createElement("template");
+  template.innerHTML = transferRowHTML(task);
+  return template.content.firstElementChild;
+}
+
+function upsertTransferRow(task) {
+  const row = transferRows.get(task.id);
+  if (!row) {
+    const el = makeTransferRow(task);
+    $("#transfer-list").appendChild(el);
+    transferRows.set(task.id, el);
+    return;
+  }
+  if (row.dataset.status !== task.status) {
+    // Status changes rewrite the action button, so replace the whole row.
+    const el = makeTransferRow(task);
+    row.replaceWith(el);
+    transferRows.set(task.id, el);
+    return;
+  }
+  // Same status: only the bar and its label can differ.
+  row.querySelector(".transfer-fill").style.width = `${transferPercent(task)}%`;
+  const state = row.querySelector(".transfer-state");
+  state.textContent = transferMeta(task);
+  state.title = state.textContent;
+}
+
+function updateTransferSummary() {
+  const total = state.transfers.size;
+  $("#transfer-summary").textContent = transferActive
+    ? `${transferActive} 项进行中 · 共 ${total} 项`
+    : total
+      ? `共 ${total} 项`
+      : "暂无传输任务";
+}
+
+// Full reconcile, used when the task set shrinks (clear finished).
+function renderTransfers() {
+  const seen = new Set();
+  for (const task of state.transfers.values()) {
+    seen.add(task.id);
+    upsertTransferRow(task);
+  }
+  for (const [id, row] of transferRows) {
+    if (seen.has(id)) continue;
+    row.remove();
+    transferRows.delete(id);
+  }
+  transferActive = 0;
+  for (const task of state.transfers.values()) {
+    if (task.status === "queued" || task.status === "running") transferActive += 1;
+  }
+  updateTransferSummary();
 }
 
 /* ==================================================================== init */

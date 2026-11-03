@@ -20,36 +20,35 @@
       <aside id="sidebar">
         <div class="sidebar-head">
           <img class="brand-logo" src="/src/assets/images/logo.png" alt="X-ssh 标志" />
-          <span class="brand-name">X-ssh <span class="brand-caption">连接工作区</span></span>
+          <span class="brand-name"><span class="brand-title">X-ssh</span><span class="brand-caption">SSH 与文件管理</span></span>
           <span class="workspace-badge">本地</span>
         </div>
 
         <div class="sidebar-actions">
+          <button class="btn workspace-home" id="btn-workspace" title="返回主机管理（保留会话）" aria-pressed="true"><span data-icon="grid"></span>主机管理<span class="count" id="host-count">0</span></button>
           <div class="search-wrap">
             <span data-icon="search"></span>
             <input id="search" class="search" type="search" placeholder="搜索主机…" aria-label="搜索主机" autocomplete="off" spellcheck="false" />
             <kbd>Ctrl F</kbd>
           </div>
-          <div class="sidebar-section">
-            <span>主机 <span class="count" id="host-count">0</span></span>
-            <div class="section-actions">
-              <button class="icon-btn" id="btn-new-group" title="新建分组" aria-label="新建分组" data-icon="folderPlus"></button>
-              <button class="icon-btn" id="btn-new-host" title="新建主机" aria-label="新建主机" data-icon="plus"></button>
-            </div>
+          <div class="row-gap">
+            <button class="btn btn-sm" id="btn-new-host"><span data-icon="plus"></span>新建主机</button>
+            <button class="btn btn-sm" id="btn-new-group"><span data-icon="folderPlus"></span>新建分组</button>
           </div>
+          <div class="sidebar-section">主机资源</div>
         </div>
 
         <div class="tree" id="tree"></div>
         <div class="sidebar-foot">
           <button class="settings-button" id="btn-settings"><span data-icon="settings"></span>设置</button>
-          <span class="sidebar-foot-note">SSH / SFTP</span>
+          <span class="sidebar-foot-note"><span class="note-ssh">SSH</span> / <span class="note-sftp">SFTP</span></span>
         </div>
       </aside>
 
       <!-- ------------------------------------------------------------- main -->
       <main id="main">
         <header class="workspace-header">
-          <div class="workspace-location"><button class="icon-btn workspace-home" id="btn-workspace" title="返回工作区（保留会话）" aria-label="返回工作区" data-icon="grid"></button><span id="workspace-title">主机连接</span></div>
+          <div class="workspace-location"><span data-icon="server"></span><span id="workspace-title">主机管理</span></div>
           <span class="workspace-context" id="workspace-context">本地工作区</span>
         </header>
         <div class="session-bar hidden" id="session-bar">
@@ -60,10 +59,10 @@
         <div class="empty" id="empty">
           <div class="dashboard">
             <div class="dashboard-heading">
-              <div><div class="eyebrow">连接工作区</div><h1>连接，从这里开始。</h1><p>管理主机、打开终端、传输文件，专注每一次连接。</p></div>
-              <button class="icon-btn dashboard-add" id="btn-empty-new" title="新建主机" aria-label="新建主机"><span data-icon="plus"></span></button>
+              <div><h1>我的主机</h1><p>管理 SSH 连接与远程文件。</p></div>
+              <button class="btn btn-primary" id="btn-empty-new"><span data-icon="plus"></span>新建主机</button>
             </div>
-            <div class="collection-head"><h2>已保存的主机 <span class="count" id="dashboard-count">0</span></h2><span>选择主机，打开终端</span></div>
+            <div class="collection-head"><h2>主机列表 <span class="count" id="dashboard-count">0</span></h2><span>按分组排列 · 拖动调整顺序</span></div>
             <div class="host-groups" id="host-grid"></div>
             <div class="workspace-tips">
               <span><kbd>Ctrl F</kbd> 搜索主机</span>

@@ -359,6 +359,24 @@ func (a *App) SftpRename(sessionID, oldPath, newPath string) error {
 	return c.Rename(oldPath, newPath)
 }
 
+// SftpReadTextFile loads a remote file for the built-in text editor.
+func (a *App) SftpReadTextFile(sessionID, path string) (string, error) {
+	c, err := a.sftp.Get(sessionID)
+	if err != nil {
+		return "", err
+	}
+	return c.ReadTextFile(path)
+}
+
+// SftpWriteTextFile saves edited content back to a remote file.
+func (a *App) SftpWriteTextFile(sessionID, path, content string) error {
+	c, err := a.sftp.Get(sessionID)
+	if err != nil {
+		return err
+	}
+	return c.WriteTextFile(path, content)
+}
+
 // SftpUpload queues a local file or folder to be sent to the host. It returns
 // the task snapshot immediately; progress and completion arrive as sftp:task
 // events.

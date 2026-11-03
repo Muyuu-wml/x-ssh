@@ -12,46 +12,52 @@
  *   浮: --surface-2      卡片浮起；也是"面"的 hover
  *   更浮: --surface-3    按钮的 hover；图标按钮的 hover
  *   选中: --selected     列表选中项（中性面）
- *   强调: --primary      文字/图标/边框；--primary-fill 是按钮填充（配深色字）
+ *   强调: --primary      文字/图标/边框；--primary-fill 是按钮填充（配白字）
  *
- * 默认石墨主题使用中性灰；appearance.js 按主题统一覆盖颜色 token。
+ * 默认深海主题使用蓝灰底；appearance.js 按主题统一覆盖颜色 token。
  * ------------------------------------------------------------------------ */
 :root {
-  /* surfaces —— 中性灰，不带蓝色调；蓝色只作强调 */
-  --bg: #14161a;
-  --glass-bg: #14161a;
-  --glass-sidebar: #181b20;
-  --sidebar-bg: #181b20;
-  --surface: #1f2329;
-  --surface-2: #2a2f37;
-  --surface-3: #363c46;
-  --border: #363c46;
-  --border-soft: #272b32;
-  --scrim: rgba(6, 7, 9, 0.7);
+  /* surfaces */
+  --bg: #1b2330;
+  --glass-bg: #1b2330;
+  --glass-sidebar: #111925;
+  --sidebar-bg: #111925;
+  --surface: #29364a;
+  --surface-2: #32425a;
+  --surface-3: #3c4e68;
+  --border: #485b77;
+  --border-soft: #34445a;
+  --scrim: rgba(3, 6, 14, 0.72);
 
   /* accent */
-  --primary: #54a6ff;
-  --primary-hi: #83bfff;
-  --primary-fill: #54a6ff; /* 浅蓝按钮配深色文字 */
-  --primary-fill-hover: #83bfff;
-  --on-accent: #101923;
-  --selected: color-mix(in srgb, #54a6ff 14%, #1f2329);
+  --primary: #68a9ff;
+  --primary-hi: #85baff;
+  --primary-fill: #2563eb;
+  --primary-fill-hover: color-mix(in srgb, #2563eb 86%, #000000);
+  --on-accent: #ffffff;
+  --selected: color-mix(in srgb, #68a9ff 14%, #29364a);
   /* 选中面上的次级文字：在 --selected 上仍需 ≥4.5:1 */
-  --text-on-selected: #b0b6c2;
+  --text-on-selected: #bac8dc;
   /* 终端选中：半透明强调色，与界面的中性面区分开 */
-  --term-selection: rgba(107, 176, 255, 0.3);
+  --term-selection: #68a9ff50;
+
+  /* 文件与编辑操作的辅助色 */
+  --accent-2: #53d99b;
+  --accent-3: #bd98ff;
+  --accent-2-fill: color-mix(in srgb, var(--accent-2) 55%, #000000);
+  --accent-3-fill: color-mix(in srgb, var(--accent-3) 60%, #000000);
 
   /* text */
-  --text: #eceef2;
-  --text-dim: #a9b0bd;
-  --text-faint: #969eae;
+  --text: #f3f6fc;
+  --text-dim: #bac8dc;
+  --text-faint: #9dadc4;
 
   /* status */
-  --danger: #ff7b7b;
-  --danger-soft: rgba(255, 123, 123, 0.12);
-  --danger-text: #fecaca;
-  --warning: #fbbf24;
-  --success: #34d399;
+  --danger: #ff9696;
+  --danger-soft: #ff969620;
+  --danger-text: #ff9696;
+  --warning: #ffbd59;
+  --success: #53d99b;
 
   /* spacing */
   --space-2: 2px;
@@ -88,7 +94,7 @@
   --focus-ring: var(--primary-hi);
 
   /* chrome */
-  --sidebar-w: 248px;
+  --sidebar-w: 256px;
   --titlebar-h: 34px;
   --window-close-bg: #c42b1c;
   --window-close-text: #ffffff;
@@ -97,8 +103,8 @@
   --control-h: 34px;
   --icon-size: 16px;
   --motion: 140ms ease;
-  --scrollbar: #3c4048;
-  --scrollbar-hover: #4b505a;
+  --scrollbar: #485b77;
+  --scrollbar-hover: #9dadc4;
   --font-ui: "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   --mono: Consolas, "Cascadia Mono", "Noto Sans SC", "Microsoft YaHei UI", monospace;
   color-scheme: dark;
@@ -172,9 +178,7 @@ body {
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
   background: var(--glass-sidebar);
-  /* 顶部一抹极淡的品牌色，打破整面纯灰 */
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--primary) 7%, transparent), transparent 140px);
-  border-right: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
 }
@@ -196,7 +200,7 @@ body {
 
 .brand-name {
   font-weight: 600;
-  font-size: var(--fs-lg);
+  font-size: var(--fs-xl);
   letter-spacing: -0.2px;
   flex: 1;
 }
@@ -205,7 +209,7 @@ body {
   padding: 0 var(--space-12);
   display: flex;
   flex-direction: column;
-  gap: var(--space-24);
+  gap: var(--space-12);
 }
 
 .row-gap {
@@ -220,7 +224,7 @@ body {
 .search {
   width: 100%;
   background: var(--surface);
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
   height: var(--control-h);
@@ -409,6 +413,20 @@ body {
 .btn-primary:hover {
   background: var(--primary-fill-hover);
   border-color: var(--primary-fill-hover);
+}
+
+.btn-files,
+.btn-edit {
+  --action-fill: var(--accent-2-fill);
+  color: var(--on-accent);
+  background: var(--action-fill);
+  border-color: var(--action-fill);
+}
+.btn-edit { --action-fill: var(--accent-3-fill); }
+.btn-files:hover,
+.btn-edit:hover {
+  background: color-mix(in srgb, var(--action-fill) 86%, #000000);
+  border-color: color-mix(in srgb, var(--action-fill) 86%, #000000);
 }
 
 .btn-ghost {
@@ -633,7 +651,7 @@ body {
   gap: var(--space-8);
   padding: var(--space-12) var(--space-16);
   border-bottom: 1px solid var(--border-soft);
-  background: transparent;
+  background: var(--surface);
   flex-wrap: wrap;
 }
 
@@ -644,6 +662,10 @@ body {
 .sftp-target {
   color: var(--text-dim);
   font-size: var(--fs-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sftp-body {
@@ -652,6 +674,8 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  gap: var(--space-12);
+  padding: var(--space-12);
 }
 
 .sftp-pane {
@@ -660,11 +684,9 @@ body {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border-right: 1px solid var(--border-soft);
-}
-
-.sftp-pane:last-child {
-  border-right: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 .sftp-pane-head {
@@ -699,6 +721,7 @@ body {
   font-size: var(--fs-xs);
   color: var(--text-faint);
   border-bottom: 1px solid var(--border-soft);
+  background: var(--surface-2);
 }
 
 .sftp-columns .c-size {
@@ -898,7 +921,7 @@ body {
 }
 
 .transfer-row:hover {
-  background: var(--surface-3, var(--surface-2));
+  background: var(--surface);
 }
 
 .transfer-row [data-icon] {
@@ -983,7 +1006,7 @@ body {
   max-height: calc(100vh - var(--titlebar-h) - 60px);
   display: flex;
   flex-direction: column;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), var(--elev-2);
+  box-shadow: var(--elev-2);
 }
 
 .modal-head {
@@ -993,6 +1016,8 @@ body {
   font-size: var(--fs-xl);
   display: flex;
   align-items: center;
+  background: var(--surface-2);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .modal-body {
@@ -1015,6 +1040,52 @@ body {
 
 .modal-foot .spacer {
   flex: 1;
+}
+
+/* Remote text editor: a full-height textarea inside the modal. */
+.editor-modal {
+  width: min(1000px, calc(100vw - 60px));
+  height: min(760px, calc(100vh - var(--titlebar-h) - 60px));
+}
+
+.editor-modal .modal-head {
+  gap: var(--space-12);
+}
+
+.editor-path {
+  min-width: 0;
+  margin-left: auto;
+  font: var(--fs-xs) var(--mono);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-text {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: none;
+  border-radius: 0;
+  outline: none;
+  padding: var(--space-16);
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-sm)/1.55 var(--mono);
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+}
+
+.editor-status {
+  align-self: center;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+.editor-modal .modal-foot {
+  align-items: center;
 }
 
 .field {
@@ -1211,8 +1282,7 @@ kbd {
   font: var(--fs-2xs)/1.2 var(--mono);
 }
 
-.sidebar-section { display: flex; align-items: center; justify-content: space-between; padding-left: var(--space-4); color: var(--text-faint); font-size: var(--fs-2xs); letter-spacing: 1px; font-weight: 600; }
-.section-actions { display: flex; gap: var(--space-2); }
+.sidebar-section { padding: var(--space-8) var(--space-4) 0; color: var(--text-faint); font-size: var(--fs-xs); font-weight: 600; }
 .count { display: inline-block; margin-left: var(--space-6); padding: 0 var(--space-6); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-dim); font: var(--fs-xs)/1.6 var(--mono); letter-spacing: 0; }
 .group-head > .icon-btn { opacity: 0; width: 22px; height: 22px; padding: var(--space-4); }
 .group-head > span:nth-child(2) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -1226,30 +1296,29 @@ kbd {
 .settings-button:hover { color: var(--text); background: var(--surface-2); }
 .sidebar-foot-note { color: var(--text-faint); font: var(--fs-2xs) var(--mono); }
 
-.workspace-header { height: var(--header-h); flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-16); padding: 0 var(--space-24); border-bottom: 1px solid var(--border-soft); }
+.workspace-header { height: var(--header-h); flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-16); padding: 0 var(--space-24); background: var(--surface); border-bottom: 1px solid var(--border); }
 .workspace-location { display: flex; align-items: center; gap: var(--space-12); min-width: 0; font-weight: 500; }
-.workspace-location > [data-icon] { color: var(--text-faint); }
+.workspace-location > [data-icon] { color: var(--primary); }
 #workspace-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-context { color: var(--text-faint); font-size: var(--fs-xs); white-space: nowrap; }
-.session-bar { display: flex; align-items: center; flex: none; gap: var(--space-8); padding-right: var(--space-8); background: transparent; border-bottom: 1px solid var(--border-soft); }
-.workspace-footer { height: var(--footer-h); flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-16); border-top: 1px solid var(--border-soft); color: var(--text-faint); font-size: var(--fs-xs); }
+.session-bar { display: flex; align-items: center; flex: none; gap: var(--space-8); padding-right: var(--space-8); background: var(--sidebar-bg); border-bottom: 1px solid var(--border); }
+.workspace-footer { height: var(--footer-h); flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-16); background: var(--surface); border-top: 1px solid var(--border); color: var(--text-dim); font-size: var(--fs-xs); }
 .workspace-footer > span { display: inline-flex; align-items: center; gap: var(--space-8); }
 .status-dot { width: 5px; height: 5px; border-radius: var(--radius-pill); background: var(--text-faint); }
 .workspace-footer.has-connections .status-dot { background: var(--success); }
 .footer-divider { color: var(--border); }
 
-.dashboard { max-width: 1120px; padding: var(--space-24); margin: 0 auto; }
+.dashboard { max-width: 1440px; padding: var(--space-24); margin: 0 auto; }
 .dashboard-heading { display: flex; justify-content: space-between; align-items: center; gap: var(--space-24); margin-bottom: var(--space-24); }
 .dashboard-heading > div { min-width: 0; }
 .dashboard-heading .btn { flex: none; }
-.eyebrow { color: var(--text-faint); font-size: var(--fs-2xs); font-weight: 500; letter-spacing: 1px; }
-.collection-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); margin-bottom: var(--space-16); }
+.collection-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-12) var(--space-16); margin-bottom: var(--space-24); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .collection-head h2 { margin: 0; color: var(--text); font-size: var(--fs-md); font-weight: 500; }
 .collection-head > span { font-size: var(--fs-sm); color: var(--text-faint); }
 .host-groups { display: flex; flex-direction: column; gap: var(--space-24); }
 .host-group { min-width: 0; }
 .host-group-heading { display: flex; align-items: center; gap: var(--space-8); margin-bottom: var(--space-12); color: var(--text-dim); }
-.host-group-heading > .icon { flex: none; }
+.host-group-heading > .icon { flex: none; color: var(--warning); }
 .host-group-heading h3 { margin: 0; min-width: 0; font-size: var(--fs-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .host-group-heading > .count { flex: none; }
 [data-sort-group], [data-sort-host] { position: relative; cursor: grab; }
@@ -1261,28 +1330,34 @@ kbd {
 .host-card.sort-drop-before::before, .host-card.sort-drop-after::after { top: 0; bottom: 0; height: auto; width: 3px; }
 .host-card.sort-drop-before::before { left: 0; right: auto; }
 .host-card.sort-drop-after::after { right: 0; left: auto; }
-.host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-8); }
-.host-card { display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: var(--space-12); padding: var(--space-12); min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); transition: border-color var(--motion), background var(--motion); }
-.host-card:hover { border-color: color-mix(in srgb, var(--text-faint) 45%, var(--border)); }
+.host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-16); }
+.host-card { display: grid; grid-template-columns: 42px minmax(0, 1fr); column-gap: var(--space-12); padding: var(--space-16) var(--space-16) 0; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; transition: border-color var(--motion); }
+.host-card:hover { border-color: var(--primary); }
 .host-card-info { display: flex; flex-direction: column; min-width: 0; }
-.host-card-symbol { grid-row: 1 / 3; align-self: center; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim); border-radius: var(--radius-md); }
-.host-card-symbol .icon { width: 18px; height: 18px; }
-.host-card-name { font-size: var(--fs-lg); font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.host-card-address { color: var(--text-dim); font: var(--fs-xs)/1.7 var(--mono); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: var(--space-4); }
-.host-card-foot { grid-column: 2; display: flex; align-items: center; gap: var(--space-8); margin-top: var(--space-4); }
-.workspace-home[aria-pressed="true"] { color: var(--primary); background: var(--selected); }
-.dashboard-add { background: var(--primary-fill); color: var(--on-accent); flex: none; }
-.dashboard-add:hover { background: var(--primary-fill-hover); color: var(--on-accent); }
+.host-card-symbol { align-self: center; width: 42px; height: 42px; display: grid; place-items: center; background: var(--selected); color: var(--primary-hi); border-radius: var(--radius-lg); }
+.host-card-symbol .icon { width: 22px; height: 22px; }
+.host-card-name { color: var(--text); font-size: var(--fs-xl); font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.host-card-address { color: var(--text-dim); font: var(--fs-sm)/1.7 var(--font-ui); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: var(--space-2); }
+.host-card-details { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); margin: var(--space-12) 0; font-size: var(--fs-xs); color: var(--text-faint); }
+.host-card-details > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.host-card-details strong { margin-left: var(--space-8); font-weight: 500; color: var(--text-dim); }
+.host-card-protocol { flex: none; padding: 0 var(--space-6); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--fs-2xs); color: var(--text-dim); }
+.host-card-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-8); margin: 0 calc(-1 * var(--space-16)); padding: var(--space-12) var(--space-16); background: var(--surface-2); border-top: 1px solid var(--border); }
+.host-card-foot .btn { flex: 1; min-height: var(--control-h); gap: var(--space-6); }
+.workspace-home { justify-content: flex-start; padding: var(--space-8) var(--space-12); background: transparent; border-color: transparent; }
+.workspace-home > .count { margin-left: auto; }
+.workspace-home[aria-pressed="true"] { color: var(--on-accent); background: var(--primary-fill); border-color: var(--primary-fill); }
+.workspace-home[aria-pressed="true"] > .count { background: color-mix(in srgb, var(--on-accent) 18%, var(--primary-fill)); color: var(--on-accent); }
 .workspace-tips { display: flex; flex-wrap: wrap; gap: var(--space-24); border-top: 1px solid var(--border-soft); margin-top: var(--space-32); padding-top: var(--space-16); color: var(--text-faint); font-size: var(--fs-xs); }
 .workspace-tips > span { display: inline-flex; align-items: center; gap: var(--space-8); }
-.onboarding { grid-column: 1 / -1; min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-12); padding: var(--space-32); border: 1px dashed var(--border); border-radius: var(--radius-lg); text-align: center; }
+.onboarding { grid-column: 1 / -1; min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-12); padding: var(--space-32); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); text-align: center; }
 .onboarding-symbol { display: grid; place-items: center; width: 48px; height: 48px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); color: var(--text-dim); margin-bottom: var(--space-4); }
 .onboarding-symbol .icon { width: 24px; height: 24px; }
 .onboarding h3 { margin: 0; font-size: var(--fs-lg); font-weight: 500; color: var(--text); }
 .onboarding p { max-width: 340px; color: var(--text-faint); font-size: var(--fs-sm); }
 .onboarding .btn { margin-top: var(--space-4); }
 
-.sftp-side-label { display: flex; align-items: center; gap: var(--space-8); min-height: 40px; padding: var(--space-8) var(--space-16); color: var(--text-dim); font-size: var(--fs-sm); border-bottom: 1px solid var(--border-soft); }
+.sftp-side-label { display: flex; align-items: center; gap: var(--space-8); min-height: 40px; padding: var(--space-8) var(--space-16); background: var(--surface-2); color: var(--text); font-size: var(--fs-sm); font-weight: 600; border-bottom: 1px solid var(--border); }
 .sftp-side-label > span { min-width: 0; margin-left: auto; color: var(--text-faint); font-size: var(--fs-xs); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sftp-side-label > select { min-width: 88px; max-width: 150px; margin-left: auto; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 3px 6px; font: var(--fs-xs) var(--mono); outline: none; }
 .sftp-side-label > select:focus { border-color: var(--primary); }
@@ -1311,12 +1386,70 @@ kbd {
 .appearance-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); margin-bottom: var(--space-24); }
 .appearance-actions .btn { flex: none; }
 
+.workspace-badge {
+  padding: 1px var(--space-6);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+/* 文件图标按类型上色：代码 / 配置 / 文档 / 压缩包 / 媒体 */
+.file-icon.ext-code { color: var(--primary-hi); }
+.file-icon.ext-config { color: var(--warning); }
+.file-icon.ext-doc { color: var(--text-dim); }
+.file-icon.ext-archive { color: var(--accent-3); }
+.file-icon.ext-media { color: var(--accent-2); }
+
+/* 操作语义色：连接蓝、文件绿、编辑紫、目录橙。 */
+
+/* 主机的三个动作 */
+.host-actions .icon-btn[data-act="terminal"] { color: var(--primary-hi); }
+.host-actions .icon-btn[data-act="sftp"] { color: var(--accent-2); }
+.host-actions .icon-btn[data-act="edit"] { color: var(--accent-3); }
+
+/* 次要入口只强调图标。 */
+#btn-new-host [data-icon] { color: var(--primary-hi); }
+#btn-new-group [data-icon] { color: var(--warning); }
+#btn-settings [data-icon] { color: var(--warning); }
+
+/* 标签页的功能色与状态点分开读。 */
+.tab[data-kind="terminal"] .tab-kind { color: var(--primary-hi); }
+.tab[data-kind="sftp"] .tab-kind { color: var(--accent-2); }
+.tab.active[data-kind="sftp"]::before { background: var(--accent-2); }
+
+/* SFTP：上传与下载使用带文字的操作按钮。 */
+.sftp-pane-head [data-act="mkdir"] { color: var(--warning); }
+.sftp-pane-head [data-act="rename"],
+.sftp-pane-head [data-act="edit"] { color: var(--accent-3); }
+.sftp-pane-head [data-act="delete"] { color: var(--danger); }
+.sftp-pane[data-side="local"] .sftp-side-label > .icon { color: var(--primary-hi); }
+.sftp-pane[data-side="remote"] .sftp-side-label > .icon { color: var(--accent-2); }
+
+/* 传输行：方向用图标颜色区分，状态仍由文字和进度条颜色表达 */
+.transfer-row[data-kind="upload"] > .icon { color: var(--primary-hi); }
+.transfer-row[data-kind="download"] > .icon { color: var(--accent-2); }
+.transfer-title > [data-icon] { color: var(--accent-2); }
+
+/* 终态覆盖方向色，完成与失败更容易识别。 */
+.transfer-row[data-kind="download"] .transfer-fill { background: var(--accent-2); }
+.transfer-row.done .transfer-fill { background: var(--success); }
+.transfer-row.failed .transfer-fill { background: var(--danger); }
+.transfer-row.canceled .transfer-fill { background: var(--text-faint); }
+
+/* 底部快捷键提示里的 SFTP 图标用文件色 */
+.workspace-tips [data-icon="transfer"] { color: var(--accent-2); }
+.sidebar-foot-note .note-ssh { color: var(--primary-hi); }
+.sidebar-foot-note .note-sftp { color: var(--accent-2); }
+
 @media (max-width: 1150px) {
   :root { --sidebar-w: 232px; }
   .dashboard { padding: var(--space-24); }
   .dashboard-heading { align-items: flex-start; margin-bottom: var(--space-24); }
   .dashboard-heading p { max-width: 300px; }
   .sftp-columns .c-date, .file-date { display: none; }
+  .sftp-body { gap: var(--space-8); padding: var(--space-8); }
+  .sftp-pane-head { gap: var(--space-2); padding: var(--space-6); }
+  .sftp-pane-head .icon-btn { width: 24px; height: 28px; padding: var(--space-4); }
 }
 
 @media (prefers-reduced-motion: reduce) {

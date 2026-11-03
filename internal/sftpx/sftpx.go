@@ -5,6 +5,7 @@
 package sftpx
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/pkg/sftp"
@@ -407,6 +409,99 @@ func (c *Client) removeTree(dir string) error {
 func (c *Client) Rename(oldPath, newPath string) error {
 	if err := c.sftp.Rename(c.ResolveEntry(oldPath), c.ResolveEntry(newPath)); err != nil {
 		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// MaxEditableSize bounds what the built-in text editor will load. The whole
+// content travels over the JSON bridge and lands in a <textarea>, so a huge file
+// would freeze the UI long before it is useful to edit.
+const MaxEditableSize = 2 << 20
+
+// ReadTextFile loads a remote file for the built-in editor.
+//
+// The path is fully resolved so editing a symlinked config file (the usual
+// sites-enabled → sites-available layout) edits the target rather than the link.
+func (c *Client) ReadTextFile(p string) (string, error) {
+	target := c.Resolve(p)
+	fi, err := c.sftp.Stat(target)
+	if err != nil {
+		return "", fmt.Errorf("stat %s: %w", target, err)
+	}
+	if fi.IsDir() {
+		return "", fmt.Errorf("%s is a directory", target)
+	}
+	if fi.Size() > MaxEditableSize {
+		return "", fmt.Errorf("%s is %d bytes; the editor limit is %d, download it instead", target, fi.Size(), MaxEditableSize)
+	}
+
+	f, err := c.sftp.Open(target)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", target, err)
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, MaxEditableSize+1))
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", target, err)
+	}
+	if len(data) > MaxEditableSize {
+		return "", fmt.Errorf("%s grew past the editor limit while opening it, download it instead", target)
+	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		return "", fmt.Errorf("%s is a binary file", target)
+	}
+	// Saving re-encodes as UTF-8, so opening an invalid sequence would replace
+	// the original bytes with U+FFFD and silently corrupt the file.
+	if !utf8.Valid(data) {
+		return "", fmt.Errorf("%s is not UTF-8; the editor only handles UTF-8 and refuses to risk corrupting it", target)
+	}
+	return string(data), nil
+}
+
+// WriteTextFile saves edited content back to a remote file.
+//
+// The write goes through a staging file in the same directory and is published
+// atomically, so a dropped connection cannot leave a half-written config in
+// place. The original permission bits are restored afterwards, because the
+// replacement is created with the server's default mode.
+func (c *Client) WriteTextFile(p, content string) error {
+	if len(content) > MaxEditableSize {
+		return fmt.Errorf("content is %d bytes, over the %d byte limit", len(content), MaxEditableSize)
+	}
+
+	target := c.Resolve(p)
+	fi, err := c.sftp.Stat(target)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", target, err)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("%s is a directory", target)
+	}
+
+	tmp := tempPath(target)
+	dst, err := c.sftp.Create(tmp)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
+	_, copyErr := io.Copy(dst, strings.NewReader(content))
+	closeErr := dst.Close()
+	if copyErr != nil {
+		_ = c.sftp.Remove(tmp)
+		return fmt.Errorf("write %s: %w", tmp, copyErr)
+	}
+	if closeErr != nil {
+		_ = c.sftp.Remove(tmp)
+		return fmt.Errorf("close %s: %w", tmp, closeErr)
+	}
+	if err := c.publishFile(tmp, target); err != nil {
+		_ = c.sftp.Remove(tmp)
+		return err
+	}
+	if mode := fi.Mode().Perm(); mode != 0 {
+		if err := c.sftp.Chmod(target, mode); err != nil {
+			return fmt.Errorf("saved %s, but its permissions could not be restored to %s: %w", target, mode, err)
+		}
 	}
 	return nil
 }
