@@ -8,27 +8,33 @@
   </head>
   <body>
     <header class="window-titlebar" id="window-titlebar">
-      <div class="window-caption"><img src="/src/assets/images/logo.png" alt="" draggable="false" /><span>X-ssh</span></div>
+      <div class="window-caption">
+        <button class="caption-logo" id="btn-brand-top" type="button" title="返回主机管理（保留会话）" aria-label="返回主机管理">
+          <img src="/src/assets/images/logo.png" alt="" draggable="false" />
+        </button>
+        <span>X-ssh</span>
+      </div>
       <div class="window-controls">
         <button class="window-control" id="window-minimise" title="最小化" aria-label="最小化" data-icon="minimise"></button>
         <button class="window-control" id="window-maximise" title="最大化" aria-label="最大化" data-icon="maximise"></button>
         <button class="window-control window-close" id="window-close" title="关闭窗口" aria-label="关闭窗口" data-icon="close"></button>
       </div>
     </header>
+
     <div id="app">
       <!-- ---------------------------------------------------------- sidebar -->
       <aside id="sidebar">
-        <div class="sidebar-head">
-          <img class="brand-logo" src="/src/assets/images/logo.png" alt="X-ssh 标志" />
-          <span class="brand-name"><span class="brand-title">X-ssh</span><span class="brand-caption">SSH 与文件管理</span></span>
-          <span class="workspace-badge">本地</span>
-        </div>
+        <!-- 侧栏顶部这一块就是"回到主机管理"的入口 -->
+        <nav class="sidebar-nav">
+          <button class="nav-item" id="btn-workspace" type="button" title="返回主机管理（保留会话）" aria-pressed="true">
+            <span data-icon="grid"></span><span>全部主机</span><span class="count" id="host-count">0</span>
+          </button>
+        </nav>
 
         <div class="sidebar-actions">
-          <button class="btn workspace-home" id="btn-workspace" title="返回主机管理（保留会话）" aria-pressed="true"><span data-icon="grid"></span>主机管理<span class="count" id="host-count">0</span></button>
           <div class="search-wrap">
             <span data-icon="search"></span>
-            <input id="search" class="search" type="search" placeholder="搜索主机…" aria-label="搜索主机" autocomplete="off" spellcheck="false" />
+            <input id="search" class="search" type="search" placeholder="搜索主机、地址、用户…" aria-label="搜索主机" autocomplete="off" spellcheck="false" />
             <kbd>Ctrl F</kbd>
           </div>
           <div class="row-gap">
@@ -39,6 +45,7 @@
         </div>
 
         <div class="tree" id="tree"></div>
+
         <div class="sidebar-foot">
           <button class="settings-button" id="btn-settings"><span data-icon="settings"></span>设置</button>
           <span class="sidebar-foot-note"><span class="note-ssh">SSH</span> / <span class="note-sftp">SFTP</span></span>
@@ -47,31 +54,56 @@
 
       <!-- ------------------------------------------------------------- main -->
       <main id="main">
-        <header class="workspace-header">
-          <div class="workspace-location"><span data-icon="server"></span><span id="workspace-title">主机管理</span></div>
-          <span class="workspace-context" id="workspace-context">本地工作区</span>
-        </header>
-        <div class="session-bar hidden" id="session-bar">
-          <div class="tabstrip" id="tabstrip"></div>
+        <div class="chrome">
+          <header class="workspace-header">
+            <div class="workspace-location">
+              <button class="icon-btn" id="btn-back" type="button" title="返回主机管理" aria-label="返回主机管理" hidden data-icon="chevronLeft"></button>
+              <span data-icon="server"></span>
+              <div class="workspace-heading">
+                <span id="workspace-title">主机管理</span>
+                <span class="workspace-context" id="workspace-context">本地工作区</span>
+              </div>
+            </div>
+            <div class="workspace-actions">
+              <span class="session-chip" id="session-chip"><span class="status-dot"></span><span id="session-chip-text">暂无活动会话</span></span>
+              <button class="btn btn-primary btn-sm" id="btn-empty-new"><span data-icon="plus"></span>新建主机</button>
+            </div>
+          </header>
+          <div class="session-bar hidden" id="session-bar">
+            <div class="tabstrip" id="tabstrip"></div>
+          </div>
         </div>
+
         <div class="panes" id="panes"></div>
 
         <div class="empty" id="empty">
           <div class="dashboard">
             <div class="dashboard-heading">
-              <div><h1>我的主机</h1><p>管理 SSH 连接与远程文件。</p></div>
-              <button class="btn btn-primary" id="btn-empty-new"><span data-icon="plus"></span>新建主机</button>
+              <div>
+                <h1>我的主机</h1>
+                <p>管理 SSH 连接与远程文件。</p>
+              </div>
+              <div class="dashboard-stats">
+                <div class="stat-tile"><b id="stat-hosts">0</b><span>主机</span></div>
+                <div class="stat-tile"><b id="stat-groups">0</b><span>分组</span></div>
+                <div class="stat-tile"><b id="stat-sessions">0</b><span>会话</span></div>
+              </div>
             </div>
             <div class="collection-head"><h2>主机列表 <span class="count" id="dashboard-count">0</span></h2><span>按分组排列 · 拖动调整顺序</span></div>
             <div class="host-groups" id="host-grid"></div>
             <div class="workspace-tips">
               <span><kbd>Ctrl F</kbd> 搜索主机</span>
+              <span><kbd>Ctrl Shift H</kbd> 回到主机管理</span>
               <span><kbd>Ctrl W</kbd> 关闭会话</span>
               <span><span data-icon="transfer"></span> 通过 SFTP 管理文件</span>
             </div>
           </div>
         </div>
-        <footer class="workspace-footer"><span><span class="status-dot"></span><span id="session-summary">暂无活动会话</span></span><span>X-ssh <span class="footer-divider">/</span> 本地工作区</span></footer>
+
+        <footer class="workspace-footer">
+          <span><span class="status-dot"></span><span id="session-summary">暂无活动会话</span></span>
+          <span>X-ssh <span class="footer-divider">/</span> 本地工作区</span>
+        </footer>
       </main>
     </div>
 

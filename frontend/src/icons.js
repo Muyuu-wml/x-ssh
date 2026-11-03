@@ -9,6 +9,7 @@ const paths = {
   maximise: '<rect x="5" y="5" width="14" height="14"/>',
   restore: '<path d="M9 5V3h12v12h-2"/><rect x="3" y="9" width="12" height="12"/>',
   chevron: '<path d="m9 5 7 7-7 7"/>',
+  chevronLeft: '<path d="m15 5-7 7 7 7"/>',
   arrow: '<path d="M4 12h16m-6-6 6 6-6 6"/>',
   up: '<path d="M12 20V4m-6 6 6-6 6 6"/>',
   upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
@@ -25,6 +26,15 @@ const paths = {
   monitor: '<rect x="3" y="3" width="18" height="13" rx="2"/><path d="M12 16v5m-5 0h10"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   settings: '<path d="m9 3-.7 2.5-2.5 1L3.5 6 2 9l2 1.7v2.6L2 15l1.5 3 2.3-.5 2.5 1L9 21h6l.7-2.5 2.5-1 2.3.5 1.5-3-2-1.7v-2.6L22 9l-1.5-3-2.3.5-2.5-1L15 3Z"/><circle cx="12" cy="12" r="3"/>',
+  home: '<path d="m3 11 9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
+  layers: '<path d="M3 8l9-5 9 5-9 5-9-5Z"/><path d="m3 13 9 5 9-5"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5 2 2-2 2 2 2-2.5 2.5-2-2"/>',
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
+  dots: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5m0 3.5h.01"/>',
+  check: '<path d="m4 12.5 5 5L20 6"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z"/>',
+  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
 };
 
 export function icon(name) {

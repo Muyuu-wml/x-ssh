@@ -367,11 +367,12 @@ function hostSymbol(host) {
 function hostRowHTML(host) {
   const active = activeTab()?.hostId === host.id;
   const selected = state.selectedHostId === host.id;
+  const live = state.tabs.some((tab) => tab.hostId === host.id && tab.status === "connected");
   return `
     <div class="host-row ${active ? "active" : ""} ${selected ? "selected" : ""}" tabindex="0" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" aria-label="${esc(host.name || host.address)}，单击选中，双击连接，拖动调整同组主机顺序" title="${esc(host.username)}@${esc(host.address)}:${host.port} · 双击连接 · 拖动排序">
       <div class="host-avatar">${hostSymbol(host)}</div>
       <div class="host-meta">
-        <div class="host-name">${esc(host.name || host.address)}</div>
+        <div class="host-name"><span class="host-name-text">${esc(host.name || host.address)}</span>${live ? '<span class="host-dot" title="已连接"></span>' : ""}</div>
         <div class="host-addr">${esc(host.username)}@${esc(host.address)}:${host.port}</div>
       </div>
       <div class="host-actions">
@@ -432,17 +433,25 @@ function renderSidebar() {
 
 function hostCardHTML(host, groupName) {
   const name = host.name || host.address;
-  return `<article class="host-card" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" title="拖动调整同组主机顺序">
-    <span class="host-card-symbol" title="${esc(groupName)}">${hostSymbol(host)}</span>
-    <div class="host-card-info">
-      <span class="host-card-name" title="${esc(name)}">${esc(name)}</span>
-      <span class="host-card-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${esc(host.address)}:${host.port}</span>
+  const live = state.tabs.some((tab) => tab.hostId === host.id && tab.status === "connected");
+  return `<article class="host-card ${live ? "is-live" : ""}" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" title="拖动调整同组主机顺序">
+    <div class="host-card-top">
+      <span class="host-card-symbol" title="${esc(groupName)}">${hostSymbol(host)}</span>
+      <div class="host-card-info">
+        <span class="host-card-name" title="${esc(name)}">${esc(name)}</span>
+        <span class="host-card-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${esc(host.address)}:${host.port}</span>
+      </div>
+      <div class="host-card-actions">
+        <button class="icon-btn" data-act="sftp" title="文件" aria-label="管理 ${esc(name)} 的文件">${icon("folder")}</button>
+        <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑 ${esc(name)}">${icon("edit")}</button>
+      </div>
     </div>
-    <div class="host-card-details"><span title="登录用户：${esc(host.username)}">用户 <strong>${esc(host.username)}</strong></span><span class="host-card-protocol">SSH</span></div>
+    <div class="host-card-tags">
+      <span class="host-card-tag" title="登录用户：${esc(host.username)}">${icon("key")} ${esc(host.username)}</span>
+      <span class="host-card-protocol">${live ? "已连接" : "SSH"}</span>
+    </div>
     <div class="host-card-foot">
       <button class="btn btn-sm btn-primary" data-act="terminal" aria-label="连接 ${esc(name)}">${icon("terminal")}连接</button>
-      <button class="btn btn-sm btn-files" data-act="sftp" aria-label="管理 ${esc(name)} 的文件">${icon("folder")}文件</button>
-      <button class="btn btn-sm btn-edit" data-act="edit" aria-label="编辑 ${esc(name)}">${icon("edit")}编辑</button>
     </div>
   </article>`;
 }
@@ -479,6 +488,8 @@ function renderDashboard() {
   visitGroups("");
   addSection("", "未分组");
   $("#dashboard-count").textContent = hosts.length;
+  $("#stat-hosts").textContent = hosts.length;
+  $("#stat-groups").textContent = [...grouped.keys()].filter((id) => id).length;
   $("#host-grid").innerHTML = hosts.length ? sections.join("") : `<div class="onboarding">
     <div class="onboarding-symbol">${icon(state.filter ? "search" : "server")}</div>
     <h3>${state.filter ? "未找到匹配的主机" : "添加主机，开始第一次连接"}</h3>
@@ -520,15 +531,33 @@ function renderTabstrip() {
   $("#empty").classList.toggle("hidden", Boolean(current));
   $("#panes").classList.toggle("hidden", !current);
   $("#btn-workspace").setAttribute("aria-pressed", String(!current));
+  $("#btn-back").hidden = !current;
   $("#workspace-title").textContent = current ? current.title : "主机管理";
   $("#workspace-context").textContent = current
     ? `${current.kind === "sftp" ? "文件传输" : "SSH 终端"} / ${tabStatusLabel(current)}`
-    : "本地工作区";
+    : `共 ${state.profile.hosts.length} 台主机 · ${state.profile.groups.length} 个分组`;
   const connected = state.tabs.filter((tab) => tab.status === "connected").length;
   $("#session-summary").textContent = state.tabs.length
     ? `${connected} 个已连接 · 共 ${state.tabs.length} 个会话`
     : "暂无活动会话";
+  $("#session-chip-text").textContent = state.tabs.length
+    ? `${connected} / ${state.tabs.length} 会话`
+    : "暂无活动会话";
+  $("#session-chip").classList.toggle("is-live", connected > 0);
+  $("#stat-sessions").textContent = state.tabs.length;
   $(".workspace-footer").classList.toggle("has-connections", connected > 0);
+  updatePaneBadges();
+}
+
+/** 面板顶条上的状态徽章要跟会话状态一起变。 */
+function updatePaneBadges() {
+  for (const tab of state.tabs) {
+    const badge = tab.paneEl?.querySelector("[data-status-badge]");
+    if (!badge) continue;
+    badge.className = `pane-badge is-${tabStatusClass(tab)}`;
+    const text = badge.querySelector("[data-status-text]");
+    if (text) text.textContent = tabStatusLabel(tab);
+  }
 }
 
 function setActiveTab(id) {
@@ -627,10 +656,22 @@ function openTerminalTab(host) {
   const pane = document.createElement("div");
   pane.className = "pane hidden";
   pane.innerHTML = `
+    <div class="pane-bar">
+      <span class="pane-bar-icon">${hostSymbol(host)}</span>
+      <span class="pane-bar-title">${esc(host.name || host.address)}</span>
+      <span class="pane-bar-meta">${esc(host.username)}@${esc(host.address)}:${host.port}</span>
+      <span class="spacer"></span>
+      <span class="pane-badge is-connecting" data-status-badge><span class="status-dot"></span><span data-status-text>连接中</span></span>
+      <button class="btn btn-sm btn-files" data-act="open-sftp" title="打开文件管理">${icon("folder")}文件</button>
+    </div>
     <div class="term-banner" data-banner style="display:none"></div>
     <div class="term-host" data-termhost></div>`;
   $("#panes").appendChild(pane);
   tab.paneEl = pane;
+
+  pane.addEventListener("click", (e) => {
+    if (e.target.closest('[data-act="open-sftp"]')) openSftpTab(host);
+  });
 
   const term = new Terminal({
     fontFamily: cssVar("--mono", 'Consolas, "Microsoft YaHei UI", monospace'),
@@ -660,6 +701,11 @@ function openTerminalTab(host) {
       if (event.shiftKey && key === "insert") {
         event.preventDefault();
         pasteTerminalClipboard(tab);
+        return false;
+      }
+      if (modifier && event.shiftKey && key === "h") {
+        // 交给全局快捷键处理，不要把控制字符发给远端 shell。
+        event.preventDefault();
         return false;
       }
     }
@@ -823,9 +869,12 @@ function openSftpTab(host) {
   const pane = document.createElement("div");
   pane.className = "pane hidden";
   pane.innerHTML = `
-    <div class="sftp-toolbar">
-      <span class="sftp-target">SFTP · ${esc(host.username)}@${esc(host.address)}:${host.port}</span>
+    <div class="pane-bar">
+      <span class="pane-bar-icon">${hostSymbol(host)}</span>
+      <span class="pane-bar-title">${esc(host.name || host.address)}</span>
+      <span class="pane-bar-meta">${esc(host.username)}@${esc(host.address)}:${host.port}</span>
       <span class="spacer"></span>
+      <span class="pane-badge is-connecting" data-status-badge><span class="status-dot"></span><span data-status-text>连接中</span></span>
       <button class="btn btn-sm btn-primary" data-act="upload" title="上传选中项到远端">${icon("upload")}上传</button>
       <button class="btn btn-sm btn-files" data-act="download" title="下载选中项到本地">${icon("download")}下载</button>
     </div>
@@ -1587,15 +1636,10 @@ async function openSettings() {
         <div class="field">
           <label>配色主题</label>
           <div class="theme-grid" role="group" aria-label="配色主题">
-            ${themes.map(t => `<button class="theme-choice" data-theme-choice="${t.id}" aria-pressed="${t.id === state.appearance.theme}" style="--preview-bg:${t.colors[0]};--preview-text:${t.colors[7]};--preview-accent:${t.colors[10]}"><span class="theme-preview" aria-hidden="true"><span></span><i></i><i></i></span><span>${t.name}</span></button>`).join("")}
+            ${themes.map(t => `<button class="theme-choice" data-theme-choice="${t.id}" aria-pressed="${t.id === state.appearance.theme}" style="--preview-bg:${t.canvas};--preview-text:${t.text};--preview-accent:${t.accent}"><span class="theme-preview" aria-hidden="true"><span></span><i></i><i></i></span><span>${t.name}</span></button>`).join("")}
           </div>
         </div>
-        <div class="field">
-          <label for="appearance-opacity">背景不透明度 <output id="opacity-value" for="appearance-opacity">${state.appearance.opacity}%</output></label>
-          <input id="appearance-opacity" type="range" min="65" max="100" step="1" value="${state.appearance.opacity}" />
-          <div class="hint">向左调整更通透，100% 为实色。文字保持清晰；窗口毛玻璃效果受 Windows 版本及系统透明效果设置影响。</div>
-        </div>
-        <div class="appearance-actions"><span class="hint">主题与透明度自动保存，下次启动沿用。</span><button class="btn btn-sm" data-act="reset-appearance">恢复默认</button></div>
+        <div class="appearance-actions"><span class="hint">主题自动保存，下次启动沿用。</span><button class="btn btn-sm" data-act="reset-appearance">恢复默认</button></div>
         <div class="field">
           <label>主机备份</label>
           <div class="hint">导出文件用你设置的密码加密，包含分组、主机和已保存的凭据，可在另一台电脑导入。文件不含明文密码，请牢记密码——丢失后无法恢复。</div>
@@ -1640,13 +1684,11 @@ async function openSettings() {
     const themeId = e.target.closest("[data-theme-choice]")?.dataset.themeChoice;
     const action = e.target.closest("[data-act]")?.dataset.act;
     if (themeId || action === "reset-appearance") {
-      state.appearance = themeId ? { ...state.appearance, theme: themeId } : { theme: "graphite", opacity: 100 };
+      state.appearance = themeId ? { ...state.appearance, theme: themeId } : { theme: "graphite" };
       updateAppearance();
       for (const button of backdrop.querySelectorAll("[data-theme-choice]")) {
         button.setAttribute("aria-pressed", String(button.dataset.themeChoice === state.appearance.theme));
       }
-      backdrop.querySelector("#appearance-opacity").value = state.appearance.opacity;
-      backdrop.querySelector("#opacity-value").textContent = `${state.appearance.opacity}%`;
       persistAppearance();
       return;
     }
@@ -1677,13 +1719,6 @@ async function openSettings() {
     try { saveAppearance(state.appearance); }
     catch (err) { fail(err, "外观设置保存失败"); }
   }
-  const opacity = backdrop.querySelector("#appearance-opacity");
-  opacity.addEventListener("input", () => {
-    state.appearance.opacity = Number(opacity.value);
-    backdrop.querySelector("#opacity-value").textContent = `${state.appearance.opacity}%`;
-    updateAppearance();
-  });
-  opacity.addEventListener("change", persistAppearance);
   $("#modal-root").appendChild(backdrop);
 }
 
@@ -1805,6 +1840,7 @@ async function reloadProfile() {
     state.profile = await GetProfile();
     if (!state.profile.hosts.some(h => h.id === state.selectedHostId)) state.selectedHostId = null;
     renderSidebar();
+    renderTabstrip();
   } catch (err) {
     fail(err, "加载配置失败");
   }
@@ -1936,6 +1972,9 @@ function wireSorting() {
 function wireEvents() {
   wireSorting();
   $("#btn-workspace").addEventListener("click", () => setActiveTab(null));
+  // 左上角 logo 与顶栏返回箭头都能回到主机管理。
+  $("#btn-brand-top").addEventListener("click", () => setActiveTab(null));
+  $("#btn-back").addEventListener("click", () => setActiveTab(null));
   $("#window-minimise").addEventListener("click", WindowMinimise);
   $("#window-maximise").addEventListener("click", WindowToggleMaximise);
   $("#window-close").addEventListener("click", Quit);
@@ -2087,6 +2126,12 @@ function wireEvents() {
   });
 
   document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "h") {
+      // 回到主机管理，会话保留在标签条里。
+      e.preventDefault();
+      setActiveTab(null);
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && ["f", "k"].includes(e.key.toLowerCase()) && !$("#modal-root").children.length) {
       e.preventDefault();
       $("#search").focus();
