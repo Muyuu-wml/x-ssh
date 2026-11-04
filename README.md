@@ -5,7 +5,7 @@
 **Go + Wails v2 + xterm.js** · 单文件 exe · 密码与密钥加密落盘
 
 ![version](https://img.shields.io/badge/version-0.1.0-blue)
-![platform](https://img.shields.io/badge/platform-windows-lightgrey)
+![platform](https://img.shields.io/badge/platform-windows-lightgrey) [![release](https://img.shields.io/github/v/release/Muyuu-wml/x-ssh?style=flat-square&color=blue)](https://github.com/Muyuu-wml/x-ssh/releases/latest) [![downloads](https://img.shields.io/github/downloads/Muyuu-wml/x-ssh/total?style=flat-square&color=green)](https://github.com/Muyuu-wml/x-ssh/releases/latest)
 
 ---
 
