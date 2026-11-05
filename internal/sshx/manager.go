@@ -178,6 +178,15 @@ func (m *Manager) Resize(id string, cols, rows int) error {
 	return s.Resize(cols, rows)
 }
 
+// Sample reports one monitoring snapshot for a live session.
+func (m *Manager) Sample(id string) (Stats, error) {
+	s, err := m.Get(id)
+	if err != nil {
+		return Stats{}, err
+	}
+	return s.Sample()
+}
+
 // Close ends a session by id.
 func (m *Manager) Close(id string) error {
 	s, err := m.Get(id)

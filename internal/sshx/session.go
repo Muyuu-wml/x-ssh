@@ -30,6 +30,10 @@ type Session struct {
 	closed    bool
 	deadBy    string        // set when the keepalive loop kills the connection
 	stopAlive chan struct{} // closes when the session ends, stopping keepalive
+
+	// Monitoring state: the previous counters let a sample report rates.
+	statsMu   sync.Mutex
+	statsPrev *rawCounters
 }
 
 // Start opens a shell with a PTY. It does not start reading output yet: call Run

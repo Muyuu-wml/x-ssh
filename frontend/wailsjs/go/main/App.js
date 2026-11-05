@@ -102,6 +102,10 @@ export function ResizeSession(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizeSession'](arg1, arg2, arg3);
 }
 
+export function SampleSystem(arg1) {
+  return window['go']['main']['App']['SampleSystem'](arg1);
+}
+
 export function SaveGroup(arg1) {
   return window['go']['main']['App']['SaveGroup'](arg1);
 }

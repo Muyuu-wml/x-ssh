@@ -24,31 +24,24 @@
     <div id="app">
       <!-- ---------------------------------------------------------- sidebar -->
       <aside id="sidebar">
-        <!-- 侧栏顶部这一块就是"回到主机管理"的入口 -->
-        <nav class="sidebar-nav">
-          <button class="nav-item" id="btn-workspace" type="button" title="返回主机管理（保留会话）" aria-pressed="true">
-            <span data-icon="grid"></span><span>全部主机</span><span class="count" id="host-count">0</span>
-          </button>
-        </nav>
+        <div class="sidebar-head">
+          <span class="sidebar-label">主机</span>
+          <span class="count" id="host-count">0</span>
+          <button class="icon-btn" id="btn-new-group" type="button" title="新建分组" aria-label="新建分组" data-icon="folderPlus"></button>
+          <button class="icon-btn" id="btn-new-host" type="button" title="新建主机" aria-label="新建主机" data-icon="plus"></button>
+        </div>
 
-        <div class="sidebar-actions">
+        <div class="sidebar-search">
           <div class="search-wrap">
             <span data-icon="search"></span>
-            <input id="search" class="search" type="search" placeholder="搜索主机、地址、用户…" aria-label="搜索主机" autocomplete="off" spellcheck="false" />
-            <kbd>Ctrl F</kbd>
+            <input id="search" class="search" type="search" placeholder="搜索主机" aria-label="搜索主机" autocomplete="off" spellcheck="false" title="搜索主机（Ctrl F）" />
           </div>
-          <div class="row-gap">
-            <button class="btn btn-sm" id="btn-new-host"><span data-icon="plus"></span>新建主机</button>
-            <button class="btn btn-sm" id="btn-new-group"><span data-icon="folderPlus"></span>新建分组</button>
-          </div>
-          <div class="sidebar-section">主机资源</div>
         </div>
 
         <div class="tree" id="tree"></div>
 
         <div class="sidebar-foot">
           <button class="settings-button" id="btn-settings"><span data-icon="settings"></span>设置</button>
-          <span class="sidebar-foot-note"><span class="note-ssh">SSH</span> / <span class="note-sftp">SFTP</span></span>
         </div>
       </aside>
 
@@ -58,7 +51,6 @@
           <header class="workspace-header">
             <div class="workspace-location">
               <button class="icon-btn" id="btn-back" type="button" title="返回主机管理" aria-label="返回主机管理" hidden data-icon="chevronLeft"></button>
-              <span data-icon="server"></span>
               <div class="workspace-heading">
                 <span id="workspace-title">主机管理</span>
                 <span class="workspace-context" id="workspace-context">本地工作区</span>
@@ -78,32 +70,9 @@
 
         <div class="empty" id="empty">
           <div class="dashboard">
-            <div class="dashboard-heading">
-              <div>
-                <h1>我的主机</h1>
-                <p>管理 SSH 连接与远程文件。</p>
-              </div>
-              <div class="dashboard-stats">
-                <div class="stat-tile"><b id="stat-hosts">0</b><span>主机</span></div>
-                <div class="stat-tile"><b id="stat-groups">0</b><span>分组</span></div>
-                <div class="stat-tile"><b id="stat-sessions">0</b><span>会话</span></div>
-              </div>
-            </div>
-            <div class="collection-head"><h2>主机列表 <span class="count" id="dashboard-count">0</span></h2><span>按分组排列 · 拖动调整顺序</span></div>
             <div class="host-groups" id="host-grid"></div>
-            <div class="workspace-tips">
-              <span><kbd>Ctrl F</kbd> 搜索主机</span>
-              <span><kbd>Ctrl Shift H</kbd> 回到主机管理</span>
-              <span><kbd>Ctrl W</kbd> 关闭会话</span>
-              <span><span data-icon="transfer"></span> 通过 SFTP 管理文件</span>
-            </div>
           </div>
         </div>
-
-        <footer class="workspace-footer">
-          <span><span class="status-dot"></span><span id="session-summary">暂无活动会话</span></span>
-          <span>X-ssh <span class="footer-divider">/</span> 本地工作区</span>
-        </footer>
       </main>
     </div>
 

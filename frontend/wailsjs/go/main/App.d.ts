@@ -56,6 +56,8 @@ export function ReorderHosts(arg1:Array<string>):Promise<void>;
 
 export function ResizeSession(arg1:string,arg2:number,arg3:number):Promise<void>;
 
+export function SampleSystem(arg1:string):Promise<sshx.Stats>;
+
 export function SaveGroup(arg1:model.Group):Promise<model.Group>;
 
 export function SaveHost(arg1:model.Host):Promise<model.Host>;

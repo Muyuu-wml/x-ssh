@@ -15,6 +15,7 @@ import {
   WriteSession,
   ResizeSession,
   CloseSession,
+  SampleSystem,
   SftpOpen,
   SftpHome,
   SftpList,
@@ -364,6 +365,11 @@ function hostSymbol(host) {
   return distroIcon(host?.distro) || icon("server");
 }
 
+// 地址按代码 token 上色：用户名 / 主机 / 端口各一色，分隔符退到背景里。
+function addressHTML(host) {
+  return `<span class="addr-user">${esc(host.username)}</span><span class="addr-sep">@</span><span class="addr-host">${esc(host.address)}</span><span class="addr-sep">:</span><span class="addr-port">${esc(host.port)}</span>`;
+}
+
 function hostRowHTML(host) {
   const active = activeTab()?.hostId === host.id;
   const selected = state.selectedHostId === host.id;
@@ -373,7 +379,7 @@ function hostRowHTML(host) {
       <div class="host-avatar">${hostSymbol(host)}</div>
       <div class="host-meta">
         <div class="host-name"><span class="host-name-text">${esc(host.name || host.address)}</span>${live ? '<span class="host-dot" title="已连接"></span>' : ""}</div>
-        <div class="host-addr">${esc(host.username)}@${esc(host.address)}:${host.port}</div>
+        <div class="host-addr" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${addressHTML(host)}</div>
       </div>
       <div class="host-actions">
         <button class="icon-btn" data-act="terminal" title="连接" aria-label="连接">${icon("terminal")}</button>
@@ -414,7 +420,7 @@ function renderSidebar() {
   if (roots.length === 0 && ungrouped.length === 0) {
     html.push(
       `<div class="tree-empty">${
-        state.filter ? "未找到匹配的主机。" : "还没有主机。<br />新建一台主机，开始连接。"
+        state.filter ? "没有匹配的主机" : "还没有主机"
       }</div>`
     );
   } else {
@@ -435,24 +441,16 @@ function hostCardHTML(host, groupName) {
   const name = host.name || host.address;
   const live = state.tabs.some((tab) => tab.hostId === host.id && tab.status === "connected");
   return `<article class="host-card ${live ? "is-live" : ""}" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" title="拖动调整同组主机顺序">
-    <div class="host-card-top">
-      <span class="host-card-symbol" title="${esc(groupName)}">${hostSymbol(host)}</span>
-      <div class="host-card-info">
-        <span class="host-card-name" title="${esc(name)}">${esc(name)}</span>
-        <span class="host-card-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${esc(host.address)}:${host.port}</span>
-      </div>
-      <div class="host-card-actions">
-        <button class="icon-btn" data-act="sftp" title="文件" aria-label="管理 ${esc(name)} 的文件">${icon("folder")}</button>
-        <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑 ${esc(name)}">${icon("edit")}</button>
-      </div>
-    </div>
-    <div class="host-card-tags">
-      <span class="host-card-tag" title="登录用户：${esc(host.username)}">${icon("key")} ${esc(host.username)}</span>
-      <span class="host-card-protocol">${live ? "已连接" : "SSH"}</span>
-    </div>
-    <div class="host-card-foot">
-      <button class="btn btn-sm btn-primary" data-act="terminal" aria-label="连接 ${esc(name)}">${icon("terminal")}连接</button>
-    </div>
+    <span class="host-card-symbol" title="${esc(groupName)}">${hostSymbol(host)}</span>
+    <span class="host-card-info">
+      <span class="host-card-name" title="${esc(name)}"><span class="host-card-name-text">${esc(name)}</span>${live ? '<span class="host-dot" title="已连接"></span>' : ""}</span>
+      <span class="host-card-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${addressHTML(host)}</span>
+    </span>
+    <span class="host-card-actions">
+      <button class="btn btn-sm host-connect" data-act="terminal" title="连接 ${esc(name)}" aria-label="连接 ${esc(name)}">连接</button>
+      <button class="icon-btn" data-act="sftp" title="文件" aria-label="管理 ${esc(name)} 的文件">${icon("folder")}</button>
+      <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑 ${esc(name)}">${icon("edit")}</button>
+    </span>
   </article>`;
 }
 
@@ -487,14 +485,9 @@ function renderDashboard() {
   };
   visitGroups("");
   addSection("", "未分组");
-  $("#dashboard-count").textContent = hosts.length;
-  $("#stat-hosts").textContent = hosts.length;
-  $("#stat-groups").textContent = [...grouped.keys()].filter((id) => id).length;
   $("#host-grid").innerHTML = hosts.length ? sections.join("") : `<div class="onboarding">
-    <div class="onboarding-symbol">${icon(state.filter ? "search" : "server")}</div>
-    <h3>${state.filter ? "未找到匹配的主机" : "添加主机，开始第一次连接"}</h3>
-    <p>${state.filter ? "试试其他主机名、地址、用户名或标签。" : "保存服务器信息，即可在这里打开终端、管理远程文件。"}</p>
-    <button class="btn btn-primary" data-act="${state.filter ? "clear-search" : "new-host"}">${icon(state.filter ? "close" : "plus")}${state.filter ? "清空搜索" : "添加第一台主机"}</button>
+    <span>${state.filter ? "没有匹配的主机" : "还没有主机"}</span>
+    <button class="btn btn-sm" data-act="${state.filter ? "clear-search" : "new-host"}">${icon(state.filter ? "close" : "plus")}${state.filter ? "清空搜索" : "新建主机"}</button>
   </div>`;
 }
 
@@ -530,22 +523,16 @@ function renderTabstrip() {
   const current = activeTab();
   $("#empty").classList.toggle("hidden", Boolean(current));
   $("#panes").classList.toggle("hidden", !current);
-  $("#btn-workspace").setAttribute("aria-pressed", String(!current));
   $("#btn-back").hidden = !current;
   $("#workspace-title").textContent = current ? current.title : "主机管理";
   $("#workspace-context").textContent = current
     ? `${current.kind === "sftp" ? "文件传输" : "SSH 终端"} / ${tabStatusLabel(current)}`
     : `共 ${state.profile.hosts.length} 台主机 · ${state.profile.groups.length} 个分组`;
   const connected = state.tabs.filter((tab) => tab.status === "connected").length;
-  $("#session-summary").textContent = state.tabs.length
-    ? `${connected} 个已连接 · 共 ${state.tabs.length} 个会话`
-    : "暂无活动会话";
   $("#session-chip-text").textContent = state.tabs.length
     ? `${connected} / ${state.tabs.length} 会话`
     : "暂无活动会话";
   $("#session-chip").classList.toggle("is-live", connected > 0);
-  $("#stat-sessions").textContent = state.tabs.length;
-  $(".workspace-footer").classList.toggle("has-connections", connected > 0);
   updatePaneBadges();
 }
 
@@ -564,6 +551,15 @@ function setActiveTab(id) {
   state.activeTabId = id;
   for (const tab of state.tabs) {
     tab.paneEl?.classList.toggle("hidden", tab.id !== id);
+  }
+  // 只给可见的终端采样，后台标签的定时器停掉。
+  for (const tab of state.tabs) {
+    if (tab.kind !== "terminal" || !tab.monitor) continue;
+    if (tab.id === id) {
+      if (tab.monitor.open) startMonitor(tab);
+    } else {
+      pauseMonitor(tab);
+    }
   }
   renderTabstrip();
   renderSidebar();
@@ -590,6 +586,7 @@ function closeTab(id) {
   } else if (tab.kind === "sftp" && tab.sessionId) {
     SftpClose(tab.sessionId).catch(() => {});
   }
+  if (tab.monitor) stopMonitor(tab);
   tab.term?.dispose();
   tab.paneEl?.remove();
   state.tabs = state.tabs.filter((t) => t.id !== id);
@@ -642,6 +639,247 @@ function pasteTerminalClipboard(tab) {
     .catch((err) => fail(err, "粘贴失败"));
 }
 
+/* ================================================================ monitor */
+
+// 采样间隔与曲线保留点数：2 秒一次，保留约 1 分半的趋势。
+const MONITOR_INTERVAL = 2000;
+const MONITOR_POINTS = 45;
+
+function monitorState(tab) {
+  if (!tab.monitor) {
+    tab.monitor = {
+      open: false,
+      timer: null,
+      busy: false,
+      stats: null,
+      error: "",
+      fails: 0,
+      cpu: [],
+      rx: [],
+      tx: [],
+    };
+  }
+  return tab.monitor;
+}
+
+function fmtBytes(bytes, digits = 1) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${Math.round(n)} B`;
+  const units = ["KB", "MB", "GB", "TB", "PB"];
+  let value = n / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(value >= 100 ? 0 : digits)} ${units[i]}`;
+}
+
+function fmtUptime(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${mins} 分`;
+  return `${mins} 分`;
+}
+
+function pushPoint(list, value) {
+  list.push(Number(value) || 0);
+  while (list.length > MONITOR_POINTS) list.shift();
+}
+
+/** 折线 + 面积，坐标压缩到 viewBox，实际尺寸交给 CSS。 */
+function sparkChart(values, max, cls) {
+  const w = 100;
+  const h = 30;
+  const top = h - 2;
+  const list = values.length === 1 ? [values[0], values[0]] : values;
+  if (!list.length) return `<svg class="spark ${cls}" viewBox="0 0 ${w} ${h}"></svg>`;
+  const ceiling = Math.max(1, Number(max) || 1);
+  const step = list.length > 1 ? w / (list.length - 1) : w;
+  const y = (v) => top - Math.min(1, Math.max(0, v / ceiling)) * (top - 4) + 2;
+  const points = list.map((v, i) => `${(i * step).toFixed(2)},${y(v).toFixed(2)}`);
+  const line = `M${points.join("L")}`;
+  return `<svg class="spark ${cls}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <path class="spark-area" d="${line}L${w},${h}L0,${h}Z"/>
+      <path class="spark-line" d="${line}" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+}
+
+function donutChart(parts, caption, note) {
+  const size = 104;
+  const stroke = 10;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const total = parts.reduce((sum, part) => sum + Math.max(0, part.value), 0) || 1;
+  let offset = 0;
+  const segments = parts
+    .filter((part) => part.value > 0)
+    .map((part) => {
+      const length = (part.value / total) * circumference;
+      const segment = `<circle class="donut-seg ${part.cls}" cx="${size / 2}" cy="${size / 2}" r="${radius}" stroke-width="${stroke}" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"/>`;
+      offset += length;
+      return segment;
+    })
+    .join("");
+  return `<div class="donut-wrap">
+      <svg class="donut" viewBox="0 0 ${size} ${size}" aria-hidden="true">${segments}</svg>
+      <div class="donut-center"><b>${caption}</b><span>${note}</span></div>
+    </div>`;
+}
+
+function renderMonitor(tab) {
+  const box = tab.paneEl?.querySelector("[data-monitor-body]");
+  if (!box) return;
+  const m = monitorState(tab);
+
+  if (m.error) {
+    box.innerHTML = `<div class="mon-empty">${esc(m.error)}</div>`;
+    return;
+  }
+  const s = m.stats;
+  if (!s) {
+    box.innerHTML = `<div class="mon-empty">正在采样…</div>`;
+    return;
+  }
+
+  const memPct = s.memTotal ? (s.memUsed / s.memTotal) * 100 : 0;
+  const memCache = Math.min(s.memCache, s.memTotal);
+  const memApp = Math.max(0, s.memTotal - s.memFree - memCache);
+  const memIdle = Math.max(0, s.memTotal - memApp - memCache);
+  const netMax = Math.max(1024, ...m.rx, ...m.tx);
+
+  const diskRows = (s.disks || [])
+    .map((disk) => {
+      const pct = disk.total ? (disk.used / disk.total) * 100 : 0;
+      const level = pct >= 95 ? "is-danger" : pct >= 85 ? "is-warning" : "is-normal";
+      return `<div class="disk-row">
+        <div class="disk-top"><span class="disk-mount">${esc(disk.mount)}</span><span class="disk-num">${fmtBytes(disk.used)} / ${fmtBytes(disk.total)}</span></div>
+        <div class="disk-bar"><span class="disk-fill ${level}" style="width:${pct.toFixed(1)}%"></span></div>
+        <div class="disk-foot"><span>${pct.toFixed(0)}% 已用</span><span>剩余 ${fmtBytes(disk.free)}</span></div>
+      </div>`;
+    })
+    .join("");
+
+  box.innerHTML = `
+    <section class="mon-card">
+      <header class="mon-head"><span class="mon-title">系统</span></header>
+      <div class="mon-os">${esc(s.os || "未知系统")}</div>
+      <div class="mon-kv">
+        <span>内核</span><b>${esc(s.kernel || "—")}</b>
+        <span>架构</span><b>${esc(s.arch || "—")}</b>
+        <span>主机</span><b>${esc(s.hostname || "—")}</b>
+        <span>运行</span><b>${fmtUptime(s.uptime)}</b>
+      </div>
+    </section>
+    <section class="mon-card">
+      <header class="mon-head"><span class="mon-title">CPU</span><span class="mon-value">${s.cpu.toFixed(0)}<i>%</i></span></header>
+      ${sparkChart(m.cpu, 100, "is-cpu")}
+      <div class="mon-foot"><span>${s.cpus || "?"} 核</span><span>负载 ${s.load1.toFixed(2)} / ${s.load5.toFixed(2)} / ${s.load15.toFixed(2)}</span></div>
+    </section>
+    <section class="mon-card">
+      <header class="mon-head"><span class="mon-title">内存</span><span class="mon-value">${memPct.toFixed(0)}<i>%</i></span></header>
+      <div class="mon-split">
+        ${donutChart(
+          [
+            { value: memApp, cls: "is-mem" },
+            { value: memCache, cls: "is-cache" },
+            { value: memIdle, cls: "is-idle" },
+          ],
+          fmtBytes(s.memUsed),
+          `共 ${fmtBytes(s.memTotal)}`,
+        )}
+        <div class="mon-legend">
+          <span><i class="dot is-mem"></i>应用 ${fmtBytes(memApp)}</span>
+          <span><i class="dot is-cache"></i>缓存 ${fmtBytes(memCache)}</span>
+          <span><i class="dot is-idle"></i>空闲 ${fmtBytes(memIdle)}</span>
+        </div>
+      </div>
+      ${s.swapTotal > 0 ? `<div class="mon-foot"><span>交换分区</span><span>${fmtBytes(s.swapUsed)} / ${fmtBytes(s.swapTotal)}</span></div>` : ""}
+    </section>
+    <section class="mon-card">
+      <header class="mon-head"><span class="mon-title">磁盘</span></header>
+      ${diskRows || `<div class="mon-empty">未检测到挂载点</div>`}
+    </section>
+    <section class="mon-card">
+      <header class="mon-head"><span class="mon-title">网络</span></header>
+      <div class="net-row"><span class="net-label is-rx">↓</span><b>${fmtBytes(s.netRxRate)}/s</b><span class="net-total">共 ${fmtBytes(s.netRxTotal)}</span></div>
+      ${sparkChart(m.rx, netMax, "is-rx")}
+      <div class="net-row"><span class="net-label is-tx">↑</span><b>${fmtBytes(s.netTxRate)}/s</b><span class="net-total">共 ${fmtBytes(s.netTxTotal)}</span></div>
+      ${sparkChart(m.tx, netMax, "is-tx")}
+    </section>`;
+}
+
+async function pollMonitor(tab) {
+  const m = monitorState(tab);
+  if (!m.open || m.busy || tab.disposed) return;
+  if (!tab.sessionId || tab.status === "closed") return;
+  m.busy = true;
+  try {
+    const stats = await SampleSystem(tab.sessionId);
+    if (tab.disposed || !m.open) return;
+    m.stats = stats;
+    m.error = "";
+    m.fails = 0;
+    pushPoint(m.cpu, stats.cpu);
+    pushPoint(m.rx, stats.netRxRate);
+    pushPoint(m.tx, stats.netTxRate);
+  } catch (err) {
+    m.fails += 1;
+    if (m.fails >= 3) m.error = `采样失败：${err?.message || err}`;
+  } finally {
+    m.busy = false;
+    if (!tab.disposed) renderMonitor(tab);
+  }
+}
+
+function startMonitor(tab) {
+  const m = monitorState(tab);
+  if (m.timer) return;
+  m.open = true;
+  m.fails = 0;
+  m.error = "";
+  pollMonitor(tab);
+  m.timer = setInterval(() => pollMonitor(tab), MONITOR_INTERVAL);
+}
+
+function stopMonitor(tab) {
+  const m = monitorState(tab);
+  m.open = false;
+  if (m.timer) {
+    clearInterval(m.timer);
+    m.timer = null;
+  }
+}
+
+/** 切走标签时只停定时器，保留用户的开关状态。 */
+function pauseMonitor(tab) {
+  const m = tab.monitor;
+  if (!m?.timer) return;
+  clearInterval(m.timer);
+  m.timer = null;
+}
+
+function toggleMonitor(tab) {
+  const m = monitorState(tab);
+  const panel = tab.paneEl?.querySelector("[data-monitor]");
+  const button = tab.paneEl?.querySelector('[data-act="toggle-monitor"]');
+  if (!panel) return;
+
+  if (m.open) {
+    stopMonitor(tab);
+  } else {
+    startMonitor(tab);
+  }
+  panel.classList.toggle("hidden", !m.open);
+  button?.classList.toggle("is-on", m.open);
+  renderMonitor(tab);
+  // 面板占掉宽度后终端列数变了，重新 fit 一次。
+  requestAnimationFrame(() => tab.fit?.fit());
+}
+
 function openTerminalTab(host) {
   const tab = {
     id: nextTabId(),
@@ -659,18 +897,30 @@ function openTerminalTab(host) {
     <div class="pane-bar">
       <span class="pane-bar-icon">${hostSymbol(host)}</span>
       <span class="pane-bar-title">${esc(host.name || host.address)}</span>
-      <span class="pane-bar-meta">${esc(host.username)}@${esc(host.address)}:${host.port}</span>
+      <span class="pane-bar-meta">${addressHTML(host)}</span>
       <span class="spacer"></span>
       <span class="pane-badge is-connecting" data-status-badge><span class="status-dot"></span><span data-status-text>连接中</span></span>
+      <button class="btn btn-sm btn-files" data-act="toggle-monitor" title="系统监控">${icon("monitor")}监控</button>
       <button class="btn btn-sm btn-files" data-act="open-sftp" title="打开文件管理">${icon("folder")}文件</button>
     </div>
     <div class="term-banner" data-banner style="display:none"></div>
-    <div class="term-host" data-termhost></div>`;
+    <div class="term-split">
+      <div class="term-host"><div class="term-fit" data-termhost></div></div>
+      <aside class="monitor hidden" data-monitor>
+        <div class="monitor-head">
+          <span class="monitor-title">${icon("monitor")}系统监控</span>
+          <button class="icon-btn" data-act="close-monitor" title="收起监控" aria-label="收起监控">${icon("chevron")}</button>
+        </div>
+        <div class="monitor-body" data-monitor-body></div>
+      </aside>
+    </div>`;
   $("#panes").appendChild(pane);
   tab.paneEl = pane;
 
   pane.addEventListener("click", (e) => {
     if (e.target.closest('[data-act="open-sftp"]')) openSftpTab(host);
+    else if (e.target.closest('[data-act="toggle-monitor"]')) toggleMonitor(tab);
+    else if (e.target.closest('[data-act="close-monitor"]')) toggleMonitor(tab);
   });
 
   const term = new Terminal({
@@ -842,6 +1092,8 @@ function attachSession(tab, id) {
     if (entry.type === "data") writeOutput(tab, entry.payload);
     else applyState(tab, entry.payload);
   }
+  // 监控面板可能在连接建立前就被打开了，这里补一次采样。
+  if (tab.monitor?.open) pollMonitor(tab);
 }
 
 /* =================================================================== sftp */
@@ -872,7 +1124,7 @@ function openSftpTab(host) {
     <div class="pane-bar">
       <span class="pane-bar-icon">${hostSymbol(host)}</span>
       <span class="pane-bar-title">${esc(host.name || host.address)}</span>
-      <span class="pane-bar-meta">${esc(host.username)}@${esc(host.address)}:${host.port}</span>
+      <span class="pane-bar-meta">${addressHTML(host)}</span>
       <span class="spacer"></span>
       <span class="pane-badge is-connecting" data-status-badge><span class="status-dot"></span><span data-status-text>连接中</span></span>
       <button class="btn btn-sm btn-primary" data-act="upload" title="上传选中项到远端">${icon("upload")}上传</button>
@@ -1431,7 +1683,7 @@ function hostEditor(host) {
   backdrop.innerHTML = `
     <div class="modal">
       <div class="modal-head">
-        <div><div class="modal-title">${icon("server")}${editing ? "编辑主机" : "新建主机"}</div><div class="modal-subtitle">配置服务器地址与身份验证方式。</div></div>
+        <div><div class="modal-title">${icon("server")}${editing ? "编辑主机" : "新建主机"}</div></div>
         <button class="icon-btn" data-act="cancel" aria-label="关闭主机编辑器">${icon("close")}</button>
       </div>
       <div class="modal-body">
@@ -1971,7 +2223,6 @@ function wireSorting() {
 
 function wireEvents() {
   wireSorting();
-  $("#btn-workspace").addEventListener("click", () => setActiveTab(null));
   // 左上角 logo 与顶栏返回箭头都能回到主机管理。
   $("#btn-brand-top").addEventListener("click", () => setActiveTab(null));
   $("#btn-back").addEventListener("click", () => setActiveTab(null));

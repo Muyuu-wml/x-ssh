@@ -262,6 +262,12 @@ func (a *App) ResizeSession(sessionID string, cols, rows int) error {
 	return a.ssh.Resize(sessionID, cols, rows)
 }
 
+// SampleSystem reports CPU, memory, disk, network and OS details for a live
+// session. The monitoring panel polls it while it is visible.
+func (a *App) SampleSystem(sessionID string) (sshx.Stats, error) {
+	return a.ssh.Sample(sessionID)
+}
+
 // CloseSession ends a shell.
 func (a *App) CloseSession(sessionID string) error {
 	return a.ssh.Close(sessionID)
