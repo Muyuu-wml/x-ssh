@@ -307,6 +307,30 @@ const activeTab = () => state.tabs.find((t) => t.id === state.activeTabId) || nu
 let tabSeq = 0;
 const nextTabId = () => `tab-${++tabSeq}`;
 
+/* ------------------------------------------------- remote path memory */
+
+// Remember where the user last browsed on each host. This is the fallback when
+// the remote shell does not report its working directory via OSC 7.
+const REMOTE_PATH_PREFIX = "xssh:lastRemotePath:";
+
+function rememberedRemotePath(hostId) {
+  if (!hostId) return "";
+  try {
+    return localStorage.getItem(REMOTE_PATH_PREFIX + hostId) || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberRemotePath(hostId, path) {
+  if (!hostId || !path) return;
+  try {
+    localStorage.setItem(REMOTE_PATH_PREFIX + hostId, path);
+  } catch {
+    // Storage can be disabled; the current tab still works without persistence.
+  }
+}
+
 /* -------------------------------------------------- backend event buffering */
 
 // Output and state events can arrive before OpenSession() resolves and the tab
@@ -437,16 +461,39 @@ function renderSidebar() {
   renderDashboard();
 }
 
-function hostCardHTML(host, groupName) {
+function relativeTime(value) {
+  if (!value) return "从未连接";
+  const then = new Date(value).getTime();
+  if (!Number.isFinite(then)) return "—";
+  const diff = Math.max(0, Date.now() - then);
+  if (diff < 60000) return "刚刚";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
+  if (diff < 7 * 86400000) return `${Math.floor(diff / 86400000)} 天前`;
+  return new Date(then).toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+function hostItemHTML(host) {
   const name = host.name || host.address;
   const live = state.tabs.some((tab) => tab.hostId === host.id && tab.status === "connected");
-  return `<article class="host-card ${live ? "is-live" : ""}" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" title="拖动调整同组主机顺序">
-    <span class="host-card-symbol" title="${esc(groupName)}">${hostSymbol(host)}</span>
-    <span class="host-card-info">
-      <span class="host-card-name" title="${esc(name)}"><span class="host-card-name-text">${esc(name)}</span>${live ? '<span class="host-dot" title="已连接"></span>' : ""}</span>
-      <span class="host-card-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${addressHTML(host)}</span>
+  const selected = state.selectedHostId === host.id;
+  const tags = (host.tags || []).filter(Boolean);
+  const shownTags = tags.slice(0, 2).map((tag) => `<span class="host-tag">${esc(tag)}</span>`).join("");
+  const moreTags = tags.length > 2 ? `<span class="host-tag is-more">+${tags.length - 2}</span>` : "";
+  const lastUsed = relativeTime(host.lastUsedAt);
+  const lastTitle = host.lastUsedAt
+    ? new Date(host.lastUsedAt).toLocaleString("zh-CN")
+    : "从未连接";
+
+  return `<article class="host-item ${live ? "is-live" : ""} ${selected ? "selected" : ""}" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" tabindex="0" aria-label="${esc(name)}，双击连接，拖动排序" title="双击连接 · 拖动排序">
+    <span class="host-item-symbol">${hostSymbol(host)}</span>
+    <span class="host-item-main">
+      <span class="host-item-name" title="${esc(name)}">${esc(name)}${live ? '<span class="host-dot" title="已连接"></span>' : ""}</span>
     </span>
-    <span class="host-card-actions">
+    <span class="host-item-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${addressHTML(host)}</span>
+    <span class="host-item-tags">${shownTags}${moreTags}</span>
+    <span class="host-item-last" title="${esc(lastTitle)}">${esc(lastUsed)}</span>
+    <span class="host-item-actions">
       <button class="btn btn-sm host-connect" data-act="terminal" title="连接 ${esc(name)}" aria-label="连接 ${esc(name)}">连接</button>
       <button class="icon-btn" data-act="sftp" title="文件" aria-label="管理 ${esc(name)} 的文件">${icon("folder")}</button>
       <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑 ${esc(name)}">${icon("edit")}</button>
@@ -468,11 +515,10 @@ function renderDashboard() {
     if (!members.length) return;
     sections.push(`<section class="host-group" aria-label="${esc(name)}">
       <div class="host-group-heading" ${id ? `data-sort-group="${esc(id)}" draggable="true" title="拖动调整同级分组顺序"` : ""}>
-        ${icon("folder")}
         <h3 title="${esc(name)}">${esc(name)}</h3>
-        <span class="count">${members.length}</span>
+        <span class="count">${members.length} 台</span>
       </div>
-      <div class="host-grid">${members.map((host) => hostCardHTML(host, name)).join("")}</div>
+      <div class="host-list">${members.map(hostItemHTML).join("")}</div>
     </section>`);
   };
   const visitGroups = (parentId, path = []) => {
@@ -485,7 +531,12 @@ function renderDashboard() {
   };
   visitGroups("");
   addSection("", "未分组");
-  $("#host-grid").innerHTML = hosts.length ? sections.join("") : `<div class="onboarding">
+  $("#host-grid").innerHTML = hosts.length ? `<div class="host-table">
+    <div class="host-table-head" aria-hidden="true">
+      <span>主机</span><span>地址</span><span>标签</span><span>最近连接</span><span></span>
+    </div>
+    ${sections.join("")}
+  </div>` : `<div class="onboarding">
     <span>${state.filter ? "没有匹配的主机" : "还没有主机"}</span>
     <button class="btn btn-sm" data-act="${state.filter ? "clear-search" : "new-host"}">${icon(state.filter ? "close" : "plus")}${state.filter ? "清空搜索" : "新建主机"}</button>
   </div>`;
@@ -880,6 +931,21 @@ function toggleMonitor(tab) {
   requestAnimationFrame(() => tab.fit?.fit());
 }
 
+/**
+ * Extracts the path from an OSC 7 payload ("file://host/path"). Shells emit this
+ * when cwd integration is enabled; it is the only reliable way to learn the
+ * working directory of an interactive shell over SSH.
+ */
+function osc7Cwd(data) {
+  const match = /^file:\/\/[^/]*(\/.*)$/.exec(String(data || ""));
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 function openTerminalTab(host) {
   const tab = {
     id: nextTabId(),
@@ -889,6 +955,7 @@ function openTerminalTab(host) {
     status: "connecting",
     error: "",
     disposed: false,
+    cwd: "",
   };
 
   const pane = document.createElement("div");
@@ -901,7 +968,7 @@ function openTerminalTab(host) {
       <span class="spacer"></span>
       <span class="pane-badge is-connecting" data-status-badge><span class="status-dot"></span><span data-status-text>连接中</span></span>
       <button class="btn btn-sm btn-files" data-act="toggle-monitor" title="系统监控">${icon("monitor")}监控</button>
-      <button class="btn btn-sm btn-files" data-act="open-sftp" title="打开文件管理">${icon("folder")}文件</button>
+      <button class="btn btn-sm btn-files" data-act="open-sftp" title="打开文件管理（优先当前目录）">${icon("folder")}文件</button>
     </div>
     <div class="term-banner" data-banner style="display:none"></div>
     <div class="term-split">
@@ -918,7 +985,7 @@ function openTerminalTab(host) {
   tab.paneEl = pane;
 
   pane.addEventListener("click", (e) => {
-    if (e.target.closest('[data-act="open-sftp"]')) openSftpTab(host);
+    if (e.target.closest('[data-act="open-sftp"]')) openSftpTab(host, { remotePath: tab.cwd });
     else if (e.target.closest('[data-act="toggle-monitor"]')) toggleMonitor(tab);
     else if (e.target.closest('[data-act="close-monitor"]')) toggleMonitor(tab);
   });
@@ -968,6 +1035,14 @@ function openTerminalTab(host) {
   term.open(pane.querySelector("[data-termhost]"));
   tab.term = term;
   tab.fit = fit;
+
+  // Progressive enhancement: use the shell's real cwd if it supports OSC 7.
+  // Otherwise openSftpTab falls back to the last directory browsed on this host.
+  term.parser.registerOscHandler(7, (data) => {
+    const cwd = osc7Cwd(data);
+    if (cwd) tab.cwd = cwd;
+    return true;
+  });
 
   state.tabs.push(tab);
   setActiveTab(tab.id);
@@ -1098,7 +1173,8 @@ function attachSession(tab, id) {
 
 /* =================================================================== sftp */
 
-function openSftpTab(host) {
+function openSftpTab(host, options = {}) {
+  const preferredRemotePath = options.remotePath || rememberedRemotePath(host.id);
   const tab = {
     id: nextTabId(),
     kind: "sftp",
@@ -1109,7 +1185,7 @@ function openSftpTab(host) {
     disposed: false,
     localPath: "",
     localDrives: [],
-    remotePath: "",
+    remotePath: preferredRemotePath,
     localEntries: [],
     remoteEntries: [],
     localSel: null,
@@ -1151,8 +1227,8 @@ function openSftpTab(host) {
           <button class="icon-btn" data-act="refresh" title="刷新">${icon("refresh")}</button>
           <input class="sftp-path" data-path spellcheck="false" aria-label="远程路径" />
           <button class="icon-btn" data-act="mkdir" title="新建文件夹">${icon("folderPlus")}</button>
-          <button class="icon-btn" data-act="rename" title="重命名">${icon("edit")}</button>
-          <button class="icon-btn" data-act="edit" title="编辑文本文件">${icon("file")}</button>
+          <button class="icon-btn" data-act="rename" title="重命名">${icon("file")}</button>
+          <button class="icon-btn" data-act="edit" title="编辑文本文件">${icon("edit")}</button>
           <button class="icon-btn" data-act="delete" title="删除">${icon("trash")}</button>
         </div>
         <div class="sftp-columns"><span>名称</span><span class="c-size">大小</span><span class="c-date">修改时间</span></div>
@@ -1193,8 +1269,7 @@ function openSftpTab(host) {
     })
     .then((home) => {
       if (home === null) return null;
-      tab.remotePath = home;
-      return refreshSide(tab, "remote");
+      return openRemoteStart(tab, home);
     })
     .catch((err) => {
       if (tab.disposed) return;
@@ -1212,6 +1287,22 @@ function openSftpTab(host) {
   });
 
   return tab;
+}
+
+/**
+ * Opens the remote pane at the preferred path (terminal cwd or last visit).
+ * A remembered directory can be deleted between sessions, so fall back to the
+ * login directory instead of leaving the pane stuck on an error.
+ */
+async function openRemoteStart(tab, home) {
+  const preferred = tab.remotePath;
+  tab.remotePath = preferred || home;
+  await refreshSide(tab, "remote");
+
+  if (tab.disposed || !preferred || preferred === home || !tab.remoteError) return;
+  tab.remotePath = home;
+  tab.remoteError = "";
+  await refreshSide(tab, "remote");
 }
 
 function wireSftpPane(tab, side) {
@@ -1366,6 +1457,7 @@ async function navigate(tab, side, target) {
     if (tab.disposed || tab[`${side}Request`] !== request) return;
     tab[`${side}Entries`] = entries;
     tab[`${side}Path`] = target;
+    if (side === "remote") rememberRemotePath(tab.hostId, target);
     tab[`${side}Sel`] = null;
     tab[`${side}Error`] = "";
   } catch (err) {
@@ -2164,9 +2256,7 @@ function wireSorting() {
   };
   const isAfter = (event, element) => {
     const rect = element.getBoundingClientRect();
-    return element.classList.contains("host-card")
-      ? event.clientX > rect.left + rect.width / 2
-      : event.clientY > rect.top + rect.height / 2;
+    return event.clientY > rect.top + rect.height / 2;
   };
 
   for (const selector of ["#tree", "#host-grid"]) {
@@ -2266,12 +2356,34 @@ function wireEvents() {
       $("#search").focus();
       return;
     }
-    const hostId = e.target.closest("[data-host]")?.dataset.host;
-    const host = state.profile.hosts.find((h) => h.id === hostId);
+    const hostRow = e.target.closest("[data-host]");
+    const host = state.profile.hosts.find((h) => h.id === hostRow?.dataset.host);
     if (!host) return;
-    if (act === "terminal") openTerminalTab(host);
-    if (act === "sftp") openSftpTab(host);
-    if (act === "edit") hostEditor(host);
+    if (act === "terminal") return openTerminalTab(host);
+    if (act === "sftp") return openSftpTab(host);
+    if (act === "edit") return hostEditor(host);
+    if (!act) selectHost(host.id);
+  });
+
+  $("#host-grid").addEventListener("dblclick", (e) => {
+    if (e.target.closest("button")) return;
+    const row = e.target.closest(".host-item");
+    const host = state.profile.hosts.find((h) => h.id === row?.dataset.host);
+    if (!host) return;
+    selectHost(host.id);
+    openTerminalTab(host);
+  });
+
+  $("#host-grid").addEventListener("keydown", (e) => {
+    if (!e.target.matches(".host-item")) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const host = state.profile.hosts.find((h) => h.id === e.target.dataset.host);
+      if (host) openTerminalTab(host);
+    } else if (e.key === " ") {
+      e.preventDefault();
+      selectHost(e.target.dataset.host);
+    }
   });
 
   // Space selects a host; Enter connects. Nested buttons keep native activation.
@@ -2605,7 +2717,7 @@ init();
 function selectHost(id) {
   state.selectedHostId = id;
   // Preserve the DOM between click events so a native double-click can fire.
-  for (const row of document.querySelectorAll("#tree .host-row")) {
+  for (const row of document.querySelectorAll("#tree .host-row, #host-grid .host-item")) {
     row.classList.toggle("selected", row.dataset.host === id);
   }
 }
