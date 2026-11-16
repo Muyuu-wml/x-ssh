@@ -159,7 +159,7 @@ type AppInfo struct {
 // GetAppInfo reports where data lives and how secrets are protected.
 func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
-		Version:     "0.1.0",
+		Version:     "0.2.0",
 		DataDir:     a.dir,
 		KeySource:   a.keySource,
 		ProfilePath: filepath.Join(a.dir, "profile.json"),
