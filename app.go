@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -372,6 +373,41 @@ func (a *App) SftpReadTextFile(sessionID, path string) (string, error) {
 		return "", err
 	}
 	return c.ReadTextFile(path)
+}
+
+// SftpReadLog loads a remote log file for the read-only log viewer. maxBytes
+// selects the tail size; zero means the whole file, still capped by the reader.
+func (a *App) SftpReadLog(sessionID, path string, maxBytes int) (sftpx.LogChunk, error) {
+	c, err := a.sftp.Get(sessionID)
+	if err != nil {
+		return sftpx.LogChunk{}, err
+	}
+	return c.ReadLog(path, maxBytes)
+}
+
+// SftpTailLog returns the complete lines appended after offset. The frontend
+// polls this while "follow" is on, so it must stay cheap when nothing changed.
+func (a *App) SftpTailLog(sessionID, path string, offset int64) (sftpx.LogIncrement, error) {
+	c, err := a.sftp.Get(sessionID)
+	if err != nil {
+		return sftpx.LogIncrement{}, err
+	}
+	return c.ReadLogSince(path, offset)
+}
+
+// SftpChmod applies an octal permission string such as "644" or "0755" to one
+// remote entry. Parsing here keeps the octal rule in one place and rejects a
+// typo before it reaches the server.
+func (a *App) SftpChmod(sessionID, path, mode string) error {
+	bits, err := strconv.ParseUint(strings.TrimSpace(mode), 8, 32)
+	if err != nil || bits > 0o7777 {
+		return fmt.Errorf("权限 %q 无效，应为八进制，例如 644 或 755", mode)
+	}
+	c, err := a.sftp.Get(sessionID)
+	if err != nil {
+		return err
+	}
+	return c.Chmod(path, os.FileMode(bits))
 }
 
 // SftpWriteTextFile saves edited content back to a remote file.

@@ -118,6 +118,10 @@ export function SftpCancelTask(arg1, arg2) {
   return window['go']['main']['App']['SftpCancelTask'](arg1, arg2);
 }
 
+export function SftpChmod(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SftpChmod'](arg1, arg2, arg3);
+}
+
 export function SftpClearTasks(arg1) {
   return window['go']['main']['App']['SftpClearTasks'](arg1);
 }
@@ -150,6 +154,10 @@ export function SftpParent(arg1, arg2) {
   return window['go']['main']['App']['SftpParent'](arg1, arg2);
 }
 
+export function SftpReadLog(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SftpReadLog'](arg1, arg2, arg3);
+}
+
 export function SftpReadTextFile(arg1, arg2) {
   return window['go']['main']['App']['SftpReadTextFile'](arg1, arg2);
 }
@@ -164,6 +172,10 @@ export function SftpRename(arg1, arg2, arg3) {
 
 export function SftpRetryTask(arg1, arg2) {
   return window['go']['main']['App']['SftpRetryTask'](arg1, arg2);
+}
+
+export function SftpTailLog(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SftpTailLog'](arg1, arg2, arg3);
 }
 
 export function SftpTasks(arg1) {

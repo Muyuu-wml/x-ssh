@@ -70,7 +70,8 @@
   --motion: 140ms ease;
   --font-ui: "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   --mono: Consolas, "Cascadia Mono", "Noto Sans SC", "Microsoft YaHei UI", monospace;
-  color-scheme: dark;
+  /* color-scheme 放在 body 上：写在 :root 会让 Chromium 把窗口底色刷成不透明，
+     整个透明毛玻璃就失效了（appearance.js 按主题在 body 上切换）。 */
 }
 
 * {
@@ -106,9 +107,7 @@ body {
 .icon-btn:focus-visible,
 .tab:focus-visible,
 .tab-close:focus-visible,
-.host-row:focus-visible,
 .file-row:focus-visible,
-.group-head:focus-visible,
 .settings-button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
@@ -226,39 +225,6 @@ body {
   flex-direction: column;
 }
 
-/* 侧栏顶部：标签 + 主机数 + 两个新建按钮，占一行 */
-.sidebar-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-8) var(--space-8) var(--space-4) var(--space-12);
-}
-
-.sidebar-label {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--text-dim);
-}
-
-.sidebar-head > .icon-btn {
-  width: 24px;
-  height: 24px;
-  padding: var(--space-4);
-  color: var(--text-faint);
-}
-
-.sidebar-head > .icon-btn:hover {
-  color: var(--text);
-}
-
-.sidebar-head > .icon-btn:first-of-type {
-  margin-left: auto;
-}
-
-.sidebar-search {
-  padding: 0 var(--space-8) var(--space-8);
-}
-
 .search {
   width: 100%;
   background: var(--surface);
@@ -322,211 +288,6 @@ kbd {
   font: var(--fs-2xs)/1.2 var(--mono);
 }
 
-/* ------------------------------------------------------------------ tree */
-.tree {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: var(--space-2) var(--space-6) var(--space-12);
-}
-
-.group-node {
-  margin-bottom: 1px;
-}
-
-.group-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-6);
-  min-height: 28px;
-  padding: var(--space-2) var(--space-8);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--text-dim);
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  transition: background var(--motion), color var(--motion);
-}
-
-.group-head:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.group-caret {
-  width: 14px;
-  display: inline-flex;
-  color: var(--text-faint);
-  transition: transform 0.12s;
-}
-
-.group-caret .icon {
-  width: 12px;
-  height: 12px;
-}
-
-.group-caret.open {
-  transform: rotate(90deg);
-}
-
-.group-count {
-  margin-left: auto;
-  font-size: var(--fs-2xs);
-  color: var(--text-faint);
-  font-family: var(--mono);
-}
-
-.group-head > span:nth-child(2) {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.group-head > .icon-btn {
-  opacity: 0;
-  width: 22px;
-  height: 22px;
-  padding: var(--space-4);
-  flex: none;
-}
-
-.group-head:hover > .icon-btn,
-.group-head:focus-within > .icon-btn {
-  opacity: 1;
-}
-
-.group-body > .group-node {
-  margin-left: var(--space-10);
-  padding-left: var(--space-6);
-  border-left: 1px solid var(--border-soft);
-}
-
-/* 主机行：单行紧凑布局，操作按钮悬停时浮出??*/
-.host-row {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-10);
-  min-height: 44px;
-  padding: var(--space-6) var(--space-8);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  position: relative;
-  transition: background var(--motion);
-}
-
-.host-row:hover {
-  background: var(--surface-2);
-}
-
-.host-row.selected {
-  background: var(--selected);
-  box-shadow: inset 2px 0 0 var(--primary);
-}
-
-.host-row.active .host-avatar {
-  color: var(--primary-hi);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 55%, transparent);
-}
-
-/* 选中面比 --surface 亮，次级文字要跟着提亮才不至于掉出 4.5:1 对比度 */
-.host-row.selected .host-addr {
-  color: var(--text-on-selected);
-}
-
-.host-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  display: grid;
-  place-items: center;
-  color: var(--text-dim);
-  flex: none;
-  font-weight: 600;
-}
-
-.host-row.selected .host-avatar,
-.host-row:hover .host-avatar {
-  background: var(--surface-3);
-  color: var(--text);
-}
-
-.host-avatar .icon,
-.host-avatar .distro-logo {
-  width: 16px;
-  height: 16px;
-}
-
-.host-meta {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.host-name {
-  display: flex;
-  align-items: center;
-  gap: var(--space-6);
-  font-weight: 500;
-  font-size: var(--fs-sm);
-  min-width: 0;
-}
-
-.host-name-text {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.host-addr {
-  font-size: var(--fs-xs);
-  color: var(--text-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.host-actions {
-  position: absolute;
-  right: var(--space-4);
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  gap: var(--space-2);
-  padding-left: var(--space-16);
-  border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, transparent, var(--surface-2) 40%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion);
-}
-
-.host-row:hover .host-actions,
-.host-row:focus-within .host-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.host-row.selected:hover .host-actions {
-  background: linear-gradient(90deg, transparent, var(--selected) 40%);
-}
-
-.host-actions .icon-btn {
-  width: 26px;
-  height: 26px;
-  padding: var(--space-4);
-  color: var(--text-dim);
-}
-
-.host-actions .icon-btn:hover {
-  color: var(--text);
-}
-
 /* 在线状态点 */
 .host-dot {
   width: 6px;
@@ -535,14 +296,6 @@ kbd {
   background: var(--success);
   flex: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 22%, transparent);
-}
-
-.tree-empty {
-  padding: var(--space-24) var(--space-12);
-  color: var(--text-faint);
-  text-align: center;
-  font-size: var(--fs-xs);
-  line-height: 1.8;
 }
 
 /* ---------------------------------------------------------------- buttons */
@@ -663,6 +416,15 @@ kbd {
 .icon-btn .icon {
   width: 14px;
   height: 14px;
+}
+
+/* 收藏这类"已开启"的图标按钮：点亮 + 实心，不靠文字解释状态 */
+.icon-btn.is-on {
+  color: var(--warning);
+}
+
+.icon-btn.is-on .icon {
+  fill: currentColor;
 }
 
 /* ------------------------------------------------------------------- main */
@@ -988,6 +750,7 @@ kbd {
   /* xterm 与此层透明，由下层面板绘制唯一一层背景 */
   background: transparent;
   padding: var(--space-8) var(--space-12);
+  position: relative;
 }
 
 /* FitAddon 量的是 xterm 父元素的高度，而父元素的内边距不算在内。
@@ -999,6 +762,50 @@ kbd {
 
 .term-host .xterm {
   height: 100%;
+}
+
+/* --------------------------------------------------------- terminal find */
+.term-find {
+  position: absolute;
+  top: var(--space-6);
+  right: var(--space-16);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-2);
+}
+
+.term-find-input {
+  width: 190px;
+  height: 24px;
+  padding: 0 var(--space-8);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: var(--fs-xs)/1 var(--mono);
+  outline: none;
+}
+
+.term-find-input:focus {
+  border-color: var(--focus-ring);
+}
+
+.term-find-count {
+  min-width: 44px;
+  color: var(--text-dim);
+  font-size: var(--fs-2xs);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.term-find-count.is-empty {
+  color: var(--danger-text);
 }
 
 .term-banner {
@@ -1457,7 +1264,26 @@ kbd {
   text-overflow: ellipsis;
 }
 
-.sftp-side-label > select {
+/* 书签下拉放在标签栏里：不占路径行的宽度，随手切目录不用
+   把整条远程路径重新打一遍 */
+.sftp-bookmarks {
+  max-width: 230px;
+  height: 22px;
+  padding: 0 var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+  outline: none;
+}
+
+.sftp-bookmarks:focus {
+  border-color: var(--focus-ring);
+}
+
+.sftp-side-label > select[data-drives] {
   min-width: 88px;
   max-width: 150px;
   margin-left: auto;
@@ -1470,7 +1296,7 @@ kbd {
   outline: none;
 }
 
-.sftp-side-label > select:focus {
+.sftp-side-label > select[data-drives]:focus {
   border-color: var(--primary);
 }
 
@@ -1503,8 +1329,14 @@ kbd {
 }
 
 .sftp-columns .c-size {
-  margin-left: auto;
   width: 78px;
+  text-align: right;
+}
+
+/* 权限列跟着名称靠右，剩下的空隙都留给名称；大小/时间固定在右侧 */
+.sftp-columns .c-mode {
+  margin-left: auto;
+  width: 84px;
   text-align: right;
 }
 
@@ -1550,11 +1382,6 @@ kbd {
   background: var(--selected);
 }
 
-.file-row.selected .file-size,
-.file-row.selected .file-date {
-  color: var(--text-on-selected);
-}
-
 .file-icon {
   width: var(--icon-size);
   display: inline-flex;
@@ -1575,7 +1402,8 @@ kbd {
   text-overflow: ellipsis;
 }
 
-.directory-open {
+.directory-open,
+.file-open {
   border: 0;
   padding: 0;
   background: transparent;
@@ -1585,12 +1413,14 @@ kbd {
   cursor: pointer;
 }
 
-.directory-open:hover {
+.directory-open:hover,
+.file-open:hover {
   color: var(--primary);
   text-decoration: underline;
 }
 
-.directory-open:focus-visible {
+.directory-open:focus-visible,
+.file-open:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -1600,6 +1430,22 @@ kbd {
   text-align: right;
   color: var(--text-faint);
   font: var(--fs-xs) var(--mono);
+}
+
+.file-mode {
+  flex: none;
+  width: 84px;
+  text-align: right;
+  color: var(--text-faint);
+  font: var(--fs-2xs) var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.file-row.selected .file-mode,
+.file-row.selected .file-size,
+.file-row.selected .file-date {
+  color: var(--text-on-selected);
 }
 
 .file-date {
@@ -2088,20 +1934,21 @@ kbd {
   text-overflow: ellipsis;
 }
 
-.editor-text {
+/* Remote text editor: CodeMirror fills the modal body. 主题与字号在
+   editor.js 的 EditorView.theme 里，用 CSS 变量跟随当前主题。 */
+.editor-host {
   flex: 1;
   min-height: 0;
-  resize: none;
-  border: none;
-  border-radius: 0;
-  outline: none;
-  padding: var(--space-16);
+  overflow: hidden;
   background: var(--bg);
-  color: var(--text);
-  font: var(--fs-sm)/1.55 var(--mono);
-  tab-size: 4;
-  white-space: pre;
-  overflow: auto;
+}
+
+.editor-host .cm-editor {
+  height: 100%;
+}
+
+.editor-host .cm-scroller {
+  font-family: var(--mono);
 }
 
 .editor-status {
@@ -2112,6 +1959,266 @@ kbd {
 
 .editor-modal .modal-foot {
   align-items: center;
+}
+
+/* ------------------------------------------------------------- log viewer */
+.log-modal {
+  width: min(1320px, calc(100vw - 60px));
+  height: min(840px, calc(100vh - var(--titlebar-h) - 60px));
+  background: var(--bg);
+}
+
+.log-modal .modal-head {
+  gap: var(--space-12);
+}
+
+/* 路径自己吃掉多余宽度，右边按"路径 · 编辑 · 关闭"贴边，别让两个 auto 边距把路径挤到中间。 */
+.log-modal .modal-head > .icon-btn {
+  margin-left: 0;
+}
+
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+
+.log-filter {
+  flex: 1;
+  min-width: 120px;
+  height: var(--control-h);
+  padding: 0 var(--space-10);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font: var(--fs-sm)/1 var(--mono);
+  outline: none;
+}
+
+.log-filter:focus {
+  border-color: var(--focus-ring);
+}
+
+.log-level,
+.log-rate {
+  height: var(--control-h);
+  padding: 0 var(--space-6);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.log-hits {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.log-hits.is-empty {
+  color: var(--danger);
+}
+
+.log-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.log-lines {
+  min-width: min-content;
+  padding: var(--space-4) 0;
+}
+
+.log-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: 1px var(--space-12);
+  line-height: 1.55;
+  white-space: nowrap;
+  border-left: 2px solid transparent;
+}
+
+.log-row:hover {
+  background: var(--surface);
+}
+
+/* 跟随后新到的行：淡绿色底，滚动时一眼看出"这是刚才刷出来的"。
+   只存在内存里，关掉弹层再打开就没了。 */
+.log-row.is-fresh {
+  --log-fresh-bg: color-mix(in srgb, var(--success) 26%, var(--bg));
+  background: var(--log-fresh-bg);
+}
+
+.log-row.is-fresh .log-actions {
+  background: var(--log-fresh-bg);
+}
+
+.log-row.is-current {
+  background: var(--selected);
+  border-left-color: var(--primary);
+}
+
+.log-time {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.log-level {
+  flex: none;
+  min-width: 42px;
+  font-weight: 600;
+}
+
+.log-level.lv-error,
+.log-level.lv-fatal,
+.log-level.lv-panic {
+  color: var(--danger);
+}
+
+.log-level.lv-warn,
+.log-level.lv-warning {
+  color: var(--warning);
+}
+
+.log-level.lv-info {
+  color: var(--primary);
+}
+
+.log-level.lv-debug,
+.log-level.lv-trace {
+  color: var(--text-faint);
+}
+
+.log-caller {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.log-text {
+  color: var(--text);
+}
+
+.log-row.is-plain .log-text {
+  color: var(--text-dim);
+}
+
+.log-repeat {
+  flex: none;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+/* 行内操作：只在 hover 时出现；长行横向滚动时用 sticky 贴在可视区右边，
+   不然几 KB 的一行会把按钮推到屏幕外。 */
+.log-actions {
+  position: sticky;
+  right: 0;
+  display: flex;
+  gap: 2px;
+  align-self: center;
+  margin-left: auto;
+  padding-left: var(--space-6);
+  background: var(--bg);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--motion);
+}
+
+.log-row:hover .log-actions,
+.log-row:focus-within .log-actions {
+  visibility: visible;
+  opacity: 1;
+  background: var(--surface);
+}
+
+.log-row.is-current .log-actions {
+  background: var(--selected);
+}
+
+.log-act {
+  width: 22px;
+  height: 22px;
+}
+
+/* 折行开关：长 msg 会把一行撑出横向滚动条，读的时候通常想让它折回来。 */
+.log-lines.is-wrap .log-row {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-lines.is-wrap .log-text {
+  flex: 1;
+}
+
+.log-text mark {
+  background: color-mix(in srgb, var(--warning) 35%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.log-foot {
+  align-items: center;
+}
+
+.log-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.log-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.log-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------- log line detail */
+.log-detail-modal {
+  width: min(1000px, calc(100vw - 80px));
+  height: min(780px, calc(100vh - var(--titlebar-h) - 80px));
+  background: var(--bg);
+}
+
+.log-detail-modal .modal-head > .icon-btn {
+  margin-left: 0;
+}
+
+.log-raw {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--space-12) var(--space-16);
+  overflow: auto;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-xs)/1.6 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  outline: none;
+  user-select: text;
 }
 
 .field {
@@ -2392,15 +2499,6 @@ input[type="checkbox"] {
 
 .host-card:hover .host-card-actions .icon-btn[data-act="sftp"],
 .host-card:focus-within .host-card-actions .icon-btn[data-act="sftp"] {
-  color: var(--tone-mint);
-}
-
-/* 侧栏动作只在 hover 时出现，可以直接上色 */
-.host-actions .icon-btn[data-act="terminal"] {
-  color: var(--primary-hi);
-}
-
-.host-actions .icon-btn[data-act="sftp"] {
   color: var(--tone-mint);
 }
 

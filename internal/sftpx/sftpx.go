@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"x-ssh/internal/model"
 	"x-ssh/internal/sshx"
@@ -413,6 +414,18 @@ func (c *Client) Rename(oldPath, newPath string) error {
 	return nil
 }
 
+// Chmod changes the permission bits of one entry.
+//
+// ResolveEntry keeps the final component as selected, so chmodding a link path
+// hits the same file the user pointed at instead of some canonicalised target.
+func (c *Client) Chmod(p string, mode os.FileMode) error {
+	target := c.ResolveEntry(p)
+	if err := c.sftp.Chmod(target, mode); err != nil {
+		return fmt.Errorf("chmod %s: %w", target, err)
+	}
+	return nil
+}
+
 // MaxEditableSize bounds what the built-in text editor will load. The whole
 // content travels over the JSON bridge and lands in a <textarea>, so a huge file
 // would freeze the UI long before it is useful to edit.
@@ -457,6 +470,142 @@ func (c *Client) ReadTextFile(p string) (string, error) {
 		return "", fmt.Errorf("%s is not UTF-8; the editor only handles UTF-8 and refuses to risk corrupting it", target)
 	}
 	return string(data), nil
+}
+
+// MaxLogReadSize caps how many bytes the log viewer pulls into memory at once.
+// The content crosses the JSON bridge and lands in the DOM, so a multi-megabyte
+// tail is already plenty; bigger files are read from the end.
+const MaxLogReadSize = 32 << 20
+
+// LogChunk is one read of a log file.
+type LogChunk struct {
+	Content   string `json:"content"`
+	Size      int64  `json:"size"`      // total file size, not the chunk size
+	ReadSize  int64  `json:"readSize"`  // bytes actually returned
+	Truncated bool   `json:"truncated"` // true when only the tail was returned
+}
+
+// ReadLog loads a log file for the read-only log viewer.
+//
+// maxBytes selects the tail size; zero (or anything above MaxLogReadSize) means
+// "the whole file", still capped. Truncation is reported instead of failing so
+// the UI can offer a second, larger read. The first line of a tail is almost
+// always a fragment, so it is dropped before parsing.
+func (c *Client) ReadLog(p string, maxBytes int) (LogChunk, error) {
+	target := c.Resolve(p)
+	fi, err := c.sftp.Stat(target)
+	if err != nil {
+		return LogChunk{}, fmt.Errorf("stat %s: %w", target, err)
+	}
+	if fi.IsDir() {
+		return LogChunk{}, fmt.Errorf("%s is a directory", target)
+	}
+
+	limit := int64(MaxLogReadSize)
+	if maxBytes > 0 && int64(maxBytes) < limit {
+		limit = int64(maxBytes)
+	}
+	readSize := fi.Size()
+	if readSize > limit {
+		readSize = limit
+	}
+
+	f, err := c.sftp.Open(target)
+	if err != nil {
+		return LogChunk{}, fmt.Errorf("open %s: %w", target, err)
+	}
+	defer f.Close()
+
+	truncated := readSize < fi.Size()
+	if truncated {
+		if _, err := f.Seek(fi.Size()-readSize, io.SeekStart); err != nil {
+			return LogChunk{}, fmt.Errorf("seek %s: %w", target, err)
+		}
+	}
+	data, err := io.ReadAll(io.LimitReader(f, readSize))
+	if err != nil {
+		return LogChunk{}, fmt.Errorf("read %s: %w", target, err)
+	}
+	if truncated {
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+			data = data[idx+1:]
+		}
+	}
+	return LogChunk{Content: decodeLog(data), Size: fi.Size(), ReadSize: int64(len(data)), Truncated: truncated}, nil
+}
+
+// decodeLog turns log bytes into text: UTF-8 first, GBK as a fallback for the
+// older services that still write Chinese logs in the local codepage.
+func decodeLog(data []byte) string {
+	if utf8.Valid(data) {
+		return string(data)
+	}
+	if decoded, err := simplifiedchinese.GBK.NewDecoder().Bytes(data); err == nil {
+		return string(decoded)
+	}
+	return strings.ToValidUTF8(string(data), "")
+}
+
+// MaxLogFollowRead caps one incremental read triggered by log following.
+// A bigger backlog is caught up over the next polls instead of stalling the UI.
+const MaxLogFollowRead = 4 << 20
+
+// LogIncrement is one incremental read while following a log file.
+type LogIncrement struct {
+	Content string `json:"content"`
+	Size    int64  `json:"size"`  // total file size after this read
+	Next    int64  `json:"next"`  // offset to pass to the next poll
+	Reset   bool   `json:"reset"` // offset is stale: the file shrank or was rotated
+}
+
+// ReadLogSince returns the complete lines written after offset.
+//
+// Only whole lines are returned: the trailing partial line is left for the next
+// poll, otherwise the UI would show a fragment as a line of its own. A stale
+// offset (logrotate copytruncate, or a different file behind the same name) is
+// reported instead of guessed, so the caller can re-read the tail.
+func (c *Client) ReadLogSince(p string, offset int64) (LogIncrement, error) {
+	target := c.Resolve(p)
+	fi, err := c.sftp.Stat(target)
+	if err != nil {
+		return LogIncrement{}, fmt.Errorf("stat %s: %w", target, err)
+	}
+	if fi.IsDir() {
+		return LogIncrement{}, fmt.Errorf("%s is a directory", target)
+	}
+
+	size := fi.Size()
+	if offset < 0 || offset > size {
+		return LogIncrement{Size: size, Reset: true}, nil
+	}
+	if offset == size {
+		return LogIncrement{Size: size, Next: offset}, nil
+	}
+
+	readSize := size - offset
+	if readSize > MaxLogFollowRead {
+		readSize = MaxLogFollowRead
+	}
+
+	f, err := c.sftp.Open(target)
+	if err != nil {
+		return LogIncrement{}, fmt.Errorf("open %s: %w", target, err)
+	}
+	defer f.Close()
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return LogIncrement{}, fmt.Errorf("seek %s: %w", target, err)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, readSize))
+	if err != nil {
+		return LogIncrement{}, fmt.Errorf("read %s: %w", target, err)
+	}
+
+	// 末尾那半行不返回、也不推进 offset：等下一次轮询把整行补齐。
+	if idx := bytes.LastIndexByte(data, '\n'); idx >= 0 {
+		data = data[:idx+1]
+	}
+	return LogIncrement{Content: decodeLog(data), Size: size, Next: offset + int64(len(data))}, nil
 }
 
 // WriteTextFile saves edited content back to a remote file.

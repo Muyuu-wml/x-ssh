@@ -75,28 +75,6 @@ body {
   border-right-color: var(--border-soft);
 }
 
-.sidebar-head {
-  padding: 16px 14px 8px;
-}
-
-.sidebar-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.sidebar-head > .icon-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-}
-
-.sidebar-search {
-  padding: 0 12px 12px;
-}
-
 .search {
   height: 38px;
   padding-left: 34px;
@@ -119,75 +97,6 @@ body {
   border-color: var(--primary);
   background: var(--surface-2);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 15%, transparent);
-}
-
-.tree {
-  padding: 4px 8px 12px;
-}
-
-.group-head {
-  min-height: 30px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  color: var(--text-faint);
-  font-size: 12px;
-}
-
-.group-head:hover {
-  background: var(--surface);
-  color: var(--text-dim);
-}
-
-.group-count {
-  font-size: 11px;
-}
-
-.host-row {
-  grid-template-columns: 32px minmax(0, 1fr);
-  gap: 10px;
-  min-height: 48px;
-  padding: 7px 10px;
-  border-radius: 10px;
-}
-
-.host-row:hover {
-  background: var(--surface);
-}
-
-.host-row.selected {
-  background: var(--selected);
-  box-shadow: inset 3px 0 0 var(--primary);
-}
-
-.host-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-
-.host-name {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.host-addr {
-  font-size: 11.5px;
-  color: var(--text-faint);
-}
-
-.host-actions {
-  background: linear-gradient(90deg, transparent, var(--surface) 40%);
-}
-
-.host-row.selected:hover .host-actions {
-  background: linear-gradient(90deg, transparent, var(--selected) 40%);
-}
-
-.host-actions .icon-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
 }
 
 .sidebar-foot {
@@ -796,5 +705,723 @@ body {
   .host-table-head span:nth-child(4),
   .host-item-last {
     display: none;
+  }
+}
+
+/* =================================================================== glass
+ *
+ * 整窗毛玻璃 + 岛式布局。
+ *
+ * 两种透明度，各管一件事：
+ *   背景（窗口画布、岛与岛之间的缝隙）：几乎全透，只压一层 14% 的主题纱幕，
+ *                                          桌面 / Acrylic 的模糊直接透上来。
+ *   岛（侧栏、顶栏、工作区、卡片、弹窗）：86% 的主题面，保证文字有足够对比度。
+ *
+ * 颜色全部由主题变量派生，切主题时玻璃跟着变色，不用新增主题字段。
+ * ------------------------------------------------------------------------ */
+
+:root {
+  --island-radius: 14px;
+  --island-gap: 8px;
+  --glass-island: color-mix(in srgb, var(--surface) 86%, transparent);
+  --glass-island-deep: color-mix(in srgb, var(--sidebar-bg) 88%, transparent);
+  --glass-island-soft: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  --glass-control: color-mix(in srgb, var(--surface-2) 82%, transparent);
+  --glass-line: color-mix(in srgb, var(--text) 14%, transparent);
+  --glass-hl: inset 0 1px 0 0 color-mix(in srgb, var(--text) 8%, transparent);
+  --glass-sheen: linear-gradient(155deg, color-mix(in srgb, var(--text) 7%, transparent), transparent 58%);
+  --glass-veil: color-mix(in srgb, var(--bg) 14%, transparent);
+  --glass-blur: blur(24px) saturate(160%);
+  --island-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+}
+
+html,
+body {
+  background: transparent;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 极淡的极光层：给玻璃一点折射内容，又不挡住桌面。
+   浓度压低到 10% 上下，否则整窗会被壁纸的颜色带成一片紫。 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 520px at 15% -12%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 70%),
+    radial-gradient(760px 460px at 96% 0%, color-mix(in srgb, var(--accent-3) 10%, transparent), transparent 72%),
+    radial-gradient(820px 560px at 60% 112%, color-mix(in srgb, var(--accent-2) 8%, transparent), transparent 76%);
+}
+
+/* 缝隙里的一层薄纱：壁纸再花也不至于刺眼，用 --bg 所以浅色主题自动变白纱 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--glass-veil);
+}
+
+/* ------------------------------------------------------------ 岛：外框 */
+.window-titlebar {
+  flex: none;
+  margin: 8px 10px 0;
+  border: 1px solid var(--glass-line);
+  border-radius: var(--island-radius);
+  background: var(--glass-island-deep);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--island-shadow), var(--glass-hl);
+  overflow: hidden;
+}
+
+#app {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  width: 100%;
+  gap: var(--island-gap);
+  padding: 8px 10px 10px;
+}
+
+#sidebar {
+  border: 1px solid var(--glass-line);
+  border-radius: var(--island-radius);
+  background: var(--glass-island-deep);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--island-shadow), var(--glass-hl);
+  overflow: hidden;
+}
+
+/* 岛与岛之间的缝隙露出桌面，主区自己不再铺底色 */
+#main {
+  background: transparent;
+  gap: var(--island-gap);
+  min-height: 0;
+}
+
+.chrome {
+  border: 1px solid var(--glass-line);
+  border-radius: var(--island-radius);
+  background: var(--glass-island);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--island-shadow), var(--glass-hl);
+}
+
+.panes,
+.empty {
+  border: 1px solid var(--glass-line);
+  border-radius: var(--island-radius);
+  background: var(--glass-island);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--island-shadow), var(--glass-hl);
+}
+
+/* 终端由岛的底色透出，面板本身不再叠色，否则两层会发灰 */
+.pane {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.window-control:hover,
+.caption-logo:hover {
+  background: var(--glass-control);
+}
+
+/* -------------------------------------------------------- 岛内的次级色块 */
+.term-banner,
+.tab.active,
+.session-chip,
+.host-table-head,
+.sftp-pane {
+  background: var(--glass-island-soft);
+  border-color: var(--glass-line);
+}
+
+.sftp-pane {
+  box-shadow: var(--glass-hl), var(--elev-1);
+}
+
+/* 吸顶表头：滚动时要盖住下面的行，所以它得自己带模糊 */
+.host-table-head {
+  backdrop-filter: var(--glass-blur);
+}
+
+.sftp-side-label,
+.sftp-pane-head {
+  background: var(--glass-control);
+}
+
+/* --------------------------------------------------------- 浮层：更靠前 */
+.host-card,
+.transfer-panel,
+.modal,
+.toast {
+  background: var(--glass-sheen), var(--glass-island);
+  backdrop-filter: var(--glass-blur);
+  border-color: var(--glass-line);
+  box-shadow: var(--glass-hl), var(--elev-1);
+}
+
+.host-card:hover {
+  background: var(--glass-sheen), var(--glass-island-soft);
+}
+
+.transfer-panel,
+.modal {
+  box-shadow: var(--glass-hl), var(--elev-2);
+}
+
+/* --------------------------------------------------------------- 控件层 */
+.search,
+.sftp-path,
+.field input[type="text"],
+.field input[type="number"],
+.field input[type="password"],
+.field select,
+.field textarea,
+.btn:not(.btn-primary),
+.btn-files,
+.btn-edit {
+  background: var(--glass-control);
+  border-color: var(--glass-line);
+}
+
+.search:hover,
+.search:focus,
+.sftp-path:hover,
+.sftp-path:focus {
+  background: color-mix(in srgb, var(--surface-3) 78%, transparent);
+}
+
+.btn:not(.btn-primary):hover,
+.btn-files:hover,
+.btn-edit:hover,
+.icon-btn:hover,
+.tab:not(.active):hover,
+.host-item:not(.selected):hover,
+.file-row:not(.selected):hover {
+  background: color-mix(in srgb, var(--surface-3) 72%, transparent);
+}
+
+.modal-backdrop {
+  background: rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(3px);
+}
+
+/* ============================================================ 主机页排版
+ *
+ * 一屏里要能读出"有多少、分几组、最近用过谁"，而不是一整片同色表格：
+ *   顶部四个概览格子给数量，分组标题带色点，行图标和标签沿用同一个色。
+ * 分组色只做点缀，靠 [data-tone] 把 --tone 一路继承到行和标签。
+ * ------------------------------------------------------------------------ */
+
+[data-tone="primary"] {
+  --tone: var(--primary);
+}
+
+[data-tone="mint"] {
+  --tone: var(--accent-2);
+}
+
+[data-tone="violet"] {
+  --tone: var(--accent-3);
+}
+
+[data-tone="amber"] {
+  --tone: var(--warning);
+}
+
+/* ------------------------------------------------------------ 概览卡片 */
+/* 超宽窗口下别把表格摊成两米长：内容收在一个舒适宽度里居中 */
+.dashboard {
+  width: 100%;
+  max-width: 1520px;
+  margin: 0 auto;
+}
+
+.dashboard-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--tone, var(--primary)) 16%, var(--glass-line));
+  border-radius: 12px;
+  /* 每张卡自带一点自己颜色的光，四张并排时才有层次，不再是一片同色 */
+  background:
+    radial-gradient(120% 150% at 0% 0%, color-mix(in srgb, var(--tone, var(--primary)) 12%, transparent), transparent 62%),
+    var(--glass-sheen),
+    var(--glass-island-soft);
+  box-shadow: var(--glass-hl);
+}
+
+.stat-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--tone, var(--primary)) 16%, transparent);
+  color: color-mix(in srgb, var(--tone, var(--primary)) 72%, var(--text));
+}
+
+.stat-icon .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.stat-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.stat-value {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* -------------------------------------------------------------- 分组标题 */
+.host-group-heading {
+  gap: 8px;
+  padding: 2px 14px 10px;
+}
+
+.host-group-heading::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--tone, var(--primary));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone, var(--primary)) 16%, transparent);
+}
+
+.host-group-heading h3 {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.host-group-heading .count {
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--tone, var(--primary)) 14%, transparent);
+  color: color-mix(in srgb, var(--tone, var(--primary)) 55%, var(--text));
+  font: 10.5px/1.7 var(--mono);
+}
+
+/* 标题右侧的延伸细线跟着分组色淡出，代替原来的纯灰分隔 */
+.host-group-heading::after {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tone, var(--primary)) 32%, transparent), transparent 72%);
+}
+
+/* ---------------------------------------------------------------- 表头
+ *
+ * 表头是列表的一部分，不是一条飘在上面的独立横条：高度收到和行一样紧凑，
+ * 底色比行实一档，标签垂直居中、跟列内容对齐。首列留出图标宽度，让"主机"
+ * 正对着主机名而不是对着图标。
+ */
+.host-table-head {
+  min-height: 34px;
+  padding: 0 14px;
+  background: color-mix(in srgb, var(--surface-3) 52%, transparent);
+  border-bottom: 1px solid var(--glass-line);
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.host-table-head + .host-group {
+  margin-top: 10px;
+}
+
+/* ------------------------------------------------------------------ 行 */
+.host-item {
+  min-height: 54px;
+  padding: 0 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+/* 没有标签的主机列表：省掉那一列，地址和最近连接不用隔着大段空白 */
+.host-table.no-tags .host-table-head,
+.host-table.no-tags .host-item {
+  grid-template-columns: 32px minmax(180px, 1.25fr) minmax(170px, 1fr) 92px 124px;
+}
+
+.host-table.no-tags .host-item-tags {
+  display: none;
+}
+
+.host-table.no-tags .host-table-head span:nth-child(3) {
+  text-align: right;
+}
+
+.host-table-head span:last-child {
+  text-align: right;
+}
+
+.host-item:last-child {
+  border-bottom: 0;
+}
+
+.host-item:not(.selected):hover {
+  background: color-mix(in srgb, var(--surface-2) 46%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--tone, var(--primary)) 65%, transparent);
+}
+
+.host-item.selected {
+  background: color-mix(in srgb, var(--tone, var(--primary)) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--tone, var(--primary));
+}
+
+/* 行图标吃分组色：整列看下来有颜色节奏，又不至于花 */
+.host-item-symbol {
+  border: 1px solid color-mix(in srgb, var(--tone, var(--primary)) 20%, transparent);
+  background: color-mix(in srgb, var(--tone, var(--primary)) 12%, transparent);
+  color: color-mix(in srgb, var(--tone, var(--primary)) 66%, var(--text));
+  transition: background var(--motion), color var(--motion);
+}
+
+.host-item:hover .host-item-symbol {
+  background: color-mix(in srgb, var(--tone, var(--primary)) 20%, transparent);
+  color: var(--tone, var(--primary));
+}
+
+/* 已连接的行保留绿色，不被分组色盖掉 */
+.host-item.is-live .host-item-symbol {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.host-item-name {
+  letter-spacing: 0.01em;
+}
+
+.host-tag {
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--tone, var(--primary)) 22%, transparent);
+  background: color-mix(in srgb, var(--tone, var(--primary)) 10%, transparent);
+  color: color-mix(in srgb, var(--tone, var(--primary)) 50%, var(--text));
+}
+
+.host-tag.is-more {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+/* 24 小时内用过的用绿色，比整列灰字更容易扫到 */
+.host-item-last.is-recent {
+  color: color-mix(in srgb, var(--success) 78%, var(--text));
+}
+
+/* ------------------------------------------------------------ 空状态 */
+.onboarding {
+  justify-content: center;
+  padding: 26px 20px;
+  border: 1px dashed var(--glass-line);
+  border-radius: 12px;
+}
+
+/* 空分组也留下来，不然没有入口重命名/删除它 */
+.host-empty {
+  padding: 14px;
+  border-bottom: 1px dashed color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* ============================================================ 侧栏：最近 + 快捷
+ *
+ * 侧栏不再重复主机管理，只放两件主面板做不了的事：
+ * 切回正在用的会话，以及把常用命令一键送进当前终端。
+ * ------------------------------------------------------------------------ */
+
+.side-block {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 8px 2px;
+}
+
+#side-recent .side-list {
+  max-height: 44vh;
+}
+
+#side-snippets {
+  flex: 1;
+  min-height: 0;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--glass-line);
+}
+
+.side-block-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 8px;
+}
+
+.side-block-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.side-block-head .icon-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+.side-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#side-snippets .side-list {
+  flex: 1;
+}
+
+.side-host {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion);
+}
+
+.side-host:hover,
+.side-host:focus-visible {
+  border-color: var(--glass-line);
+  background: color-mix(in srgb, var(--surface-3) 55%, transparent);
+}
+
+.side-host:focus-visible,
+.snippet:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.side-host-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 11%, transparent);
+  color: color-mix(in srgb, var(--primary) 68%, var(--text));
+}
+
+.side-host-icon .icon,
+.side-host-icon .distro-logo {
+  width: 16px;
+  height: 16px;
+}
+
+.side-host-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.side-host-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.side-host-addr {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+  font: 10.5px var(--mono);
+}
+
+.side-host-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.side-host-dot.is-live {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.snippet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion);
+}
+
+.snippet:hover,
+.snippet:focus-visible {
+  border-color: var(--glass-line);
+  background: color-mix(in srgb, var(--surface-3) 55%, transparent);
+}
+
+.snippet-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.snippet-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.snippet-cmd {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+  font: 10.5px var(--mono);
+}
+
+.snippet-actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity var(--motion);
+}
+
+.snippet:hover .snippet-actions,
+.snippet:focus-within .snippet-actions {
+  opacity: 1;
+}
+
+.snippet-actions .icon-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.side-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 10px 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.side-empty span {
+  font-size: 11px;
+  opacity: 0.78;
+}
+
+/* 搜索从侧栏搬到主面板：主机页自己带工具栏更顺手 */
+.dashboard-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.dashboard-bar .search-wrap {
+  flex: 1;
+  max-width: 360px;
+}
+
+.dashboard-bar .search {
+  height: 36px;
+}
+
+/* 分组标题右侧的改名/删除：平时不抢视线，指上去才出现 */
+.host-group-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: 2px;
+  opacity: 0;
+  order: 1;
+  transition: opacity var(--motion);
+}
+
+.host-group:hover .host-group-actions,
+.host-group-heading:focus-within .host-group-actions {
+  opacity: 1;
+}
+
+.host-group-actions .icon-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--text-faint);
+}
+
+.host-group-actions .icon-btn:hover {
+  color: var(--text);
+}
+
+@media (max-width: 1180px) {
+  .dashboard-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -64,6 +64,8 @@ export function SaveHost(arg1:model.Host):Promise<model.Host>;
 
 export function SftpCancelTask(arg1:string,arg2:string):Promise<void>;
 
+export function SftpChmod(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function SftpClearTasks(arg1:string):Promise<Array<string>>;
 
 export function SftpClose(arg1:string):Promise<void>;
@@ -80,6 +82,8 @@ export function SftpOpen(arg1:string):Promise<string>;
 
 export function SftpParent(arg1:string,arg2:string):Promise<string>;
 
+export function SftpReadLog(arg1:string,arg2:string,arg3:number):Promise<sftpx.LogChunk>;
+
 export function SftpReadTextFile(arg1:string,arg2:string):Promise<string>;
 
 export function SftpRemove(arg1:string,arg2:string,arg3:boolean):Promise<void>;
@@ -87,6 +91,8 @@ export function SftpRemove(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 export function SftpRename(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SftpRetryTask(arg1:string,arg2:string):Promise<void>;
+
+export function SftpTailLog(arg1:string,arg2:string,arg3:number):Promise<sftpx.LogIncrement>;
 
 export function SftpTasks(arg1:string):Promise<Array<sftpx.TaskView>>;
 

@@ -25,21 +25,20 @@
     <div id="app">
       <!-- ---------------------------------------------------------- sidebar -->
       <aside id="sidebar">
-        <div class="sidebar-head">
-          <span class="sidebar-label">主机</span>
-          <span class="count" id="host-count">0</span>
-          <button class="icon-btn" id="btn-new-group" type="button" title="新建分组" aria-label="新建分组" data-icon="folderPlus"></button>
-          <button class="icon-btn" id="btn-new-host" type="button" title="新建主机" aria-label="新建主机" data-icon="plus"></button>
-        </div>
-
-        <div class="sidebar-search">
-          <div class="search-wrap">
-            <span data-icon="search"></span>
-            <input id="search" class="search" type="search" placeholder="搜索主机" aria-label="搜索主机" autocomplete="off" spellcheck="false" title="搜索主机（Ctrl F）" />
+        <section class="side-block" id="side-recent">
+          <div class="side-block-head">
+            <span class="side-block-title">最近连接</span>
           </div>
-        </div>
+          <div class="side-list" id="recent-hosts"></div>
+        </section>
 
-        <div class="tree" id="tree"></div>
+        <section class="side-block" id="side-snippets">
+          <div class="side-block-head">
+            <span class="side-block-title">快捷指令</span>
+            <button class="icon-btn" id="btn-new-snippet" type="button" title="新建快捷指令" aria-label="新建快捷指令" data-icon="plus"></button>
+          </div>
+          <div class="side-list" id="snippets"></div>
+        </section>
 
         <div class="sidebar-foot">
           <button class="settings-button" id="btn-settings"><span data-icon="settings"></span>设置</button>
@@ -71,6 +70,14 @@
 
         <div class="empty" id="empty">
           <div class="dashboard">
+            <div class="dashboard-bar">
+              <div class="search-wrap">
+                <span data-icon="search"></span>
+                <input id="search" class="search" type="search" placeholder="搜索主机、地址或标签" aria-label="搜索主机" autocomplete="off" spellcheck="false" title="搜索主机（Ctrl F）" />
+              </div>
+              <button class="btn btn-sm" id="btn-new-group" type="button" title="新建分组"><span data-icon="folderPlus"></span>新建分组</button>
+            </div>
+            <div class="dashboard-stats" id="dashboard-stats"></div>
             <div class="host-groups" id="host-grid"></div>
           </div>
         </div>

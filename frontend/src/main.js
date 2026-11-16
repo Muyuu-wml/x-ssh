@@ -1,6 +1,7 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 
 import {
@@ -24,6 +25,9 @@ import {
   SftpRemove,
   SftpRename,
   SftpReadTextFile,
+  SftpReadLog,
+  SftpTailLog,
+  SftpChmod,
   SftpWriteTextFile,
   SftpUpload,
   SftpDownload,
@@ -54,13 +58,16 @@ import {
   WindowMinimise,
   WindowToggleMaximise,
   WindowIsMaximised,
+  WindowSetSize,
+  WindowCenter,
   ClipboardGetText,
   ClipboardSetText,
   Quit,
 } from "../wailsjs/runtime/runtime";
 import { icon, mountIcons } from "./icons";
 import { distroIcon } from "./distros";
-import { themes, loadAppearance, saveAppearance, applyAppearance } from "./appearance";
+import { mountCodeEditor } from "./editor";
+import { themes, loadAppearance, saveAppearance, applyAppearance, normalizeAppearance } from "./appearance";
 
 /* ================================================================== helpers */
 
@@ -140,6 +147,39 @@ function terminalTheme() {
     brightCyan: cssVar("--term-cyan", "#89dceb"),
     brightWhite: cssVar("--text", "#eceef2"),
   };
+}
+
+/* --------------------------------------------------- terminal font size */
+
+const TERM_FONT_KEY = "xssh:termFontSize";
+const TERM_FONT_MIN = 9;
+const TERM_FONT_MAX = 28;
+
+/** 字号按用户习惯记在本机；存坏了就退回设计稿的正文大小。 */
+function loadTermFontSize() {
+  const saved = Number(localStorage.getItem(TERM_FONT_KEY));
+  if (Number.isFinite(saved) && saved >= TERM_FONT_MIN && saved <= TERM_FONT_MAX) return saved;
+  return cssPx("--fs-md", 14);
+}
+
+/**
+ * 改所有终端标签的字号并重新适配行列。
+ * 终端只有 FitAddon 重新算过 cols/rows 之后，远端才会按新宽度换行。
+ */
+function setTermFontSize(size) {
+  const next = Math.min(TERM_FONT_MAX, Math.max(TERM_FONT_MIN, Math.round(size)));
+  if (next === state.termFontSize) return;
+  state.termFontSize = next;
+  try {
+    localStorage.setItem(TERM_FONT_KEY, String(next));
+  } catch {
+    // 存不下就只在本次运行内生效
+  }
+  for (const tab of state.tabs) {
+    if (tab.kind !== "terminal" || !tab.term) continue;
+    tab.term.options.fontSize = next;
+    tab.fit?.fit();
+  }
 }
 
 function toast(message, kind = "info", ms = 4200) {
@@ -298,8 +338,10 @@ const state = {
   activeTabId: null,
   selectedHostId: null,
   appearance: loadAppearance(),
+  localStart: "", // init() 里读，避免在 localStorage key 声明前调用
+  snippets: [],
   filter: "",
-  expanded: new Set(),
+  termFontSize: loadTermFontSize(),
 };
 
 const activeTab = () => state.tabs.find((t) => t.id === state.activeTabId) || null;
@@ -328,6 +370,52 @@ function rememberRemotePath(hostId, path) {
     localStorage.setItem(REMOTE_PATH_PREFIX + hostId, path);
   } catch {
     // Storage can be disabled; the current tab still works without persistence.
+  }
+}
+
+/* -------------------------------------------------------- remote bookmarks */
+
+// 常用目录按主机分开存：同一台机器上的日志目录混进另一台没有意义。
+const BOOKMARK_PREFIX = "xssh:bookmarks:";
+
+function loadBookmarks(hostId) {
+  if (!hostId) return [];
+  try {
+    const list = JSON.parse(localStorage.getItem(BOOKMARK_PREFIX + hostId) || "[]");
+    return Array.isArray(list) ? list.filter((p) => typeof p === "string" && p.startsWith("/")) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveBookmarks(hostId, list) {
+  if (!hostId) return;
+  try {
+    localStorage.setItem(BOOKMARK_PREFIX + hostId, JSON.stringify(list));
+  } catch {
+    // 存不下就只在本次运行内生效
+  }
+}
+
+/* ------------------------------------------------------ local start path */
+
+// 本地文件面板打开时从哪儿开始。空 = 跟随系统（家目录所在的盘）。
+const LOCAL_START_KEY = "xssh:localStartPath";
+
+function loadLocalStart() {
+  try {
+    return localStorage.getItem(LOCAL_START_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function saveLocalStart(path) {
+  try {
+    if (path) localStorage.setItem(LOCAL_START_KEY, path);
+    else localStorage.removeItem(LOCAL_START_KEY);
+  } catch {
+    // 存不下就只在本次运行内生效，不影响功能
   }
 }
 
@@ -374,10 +462,6 @@ function orderedHostsInGroup(groupId) {
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 }
 
-function hostsInGroup(groupId) {
-  return orderedHostsInGroup(groupId).filter(matchesHost);
-}
-
 function childGroups(parentId) {
   return state.profile.groups
     .filter((g) => (g.parentId || "") === parentId)
@@ -394,70 +478,175 @@ function addressHTML(host) {
   return `<span class="addr-user">${esc(host.username)}</span><span class="addr-sep">@</span><span class="addr-host">${esc(host.address)}</span><span class="addr-sep">:</span><span class="addr-port">${esc(host.port)}</span>`;
 }
 
-function hostRowHTML(host) {
-  const active = activeTab()?.hostId === host.id;
-  const selected = state.selectedHostId === host.id;
-  const live = state.tabs.some((tab) => tab.hostId === host.id && tab.status === "connected");
-  return `
-    <div class="host-row ${active ? "active" : ""} ${selected ? "selected" : ""}" tabindex="0" data-host="${esc(host.id)}" data-sort-host="${esc(host.id)}" draggable="true" aria-label="${esc(host.name || host.address)}，单击选中，双击连接，拖动调整同组主机顺序" title="${esc(host.username)}@${esc(host.address)}:${host.port} · 双击连接 · 拖动排序">
-      <div class="host-avatar">${hostSymbol(host)}</div>
-      <div class="host-meta">
-        <div class="host-name"><span class="host-name-text">${esc(host.name || host.address)}</span>${live ? '<span class="host-dot" title="已连接"></span>' : ""}</div>
-        <div class="host-addr" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${addressHTML(host)}</div>
-      </div>
-      <div class="host-actions">
-        <button class="icon-btn" data-act="terminal" title="连接" aria-label="连接">${icon("terminal")}</button>
-        <button class="icon-btn" data-act="sftp" title="文件" aria-label="文件">${icon("folder")}</button>
-        <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑">${icon("edit")}</button>
-      </div>
-    </div>`;
+/* ------------------------------------------------------------ 最近连接 */
+
+/** 侧栏上半：开着的会话排前面，再补最近用过的，最多 6 台。 */
+function recentHosts() {
+  const seen = new Set();
+  const ids = [];
+  for (const tab of state.tabs) {
+    if (!tab.hostId || tab.status === "closed" || seen.has(tab.hostId)) continue;
+    seen.add(tab.hostId);
+    ids.push(tab.hostId);
+  }
+  const recent = state.profile.hosts
+    .filter((host) => host.lastUsedAt && !seen.has(host.id))
+    .sort((a, b) => new Date(b.lastUsedAt) - new Date(a.lastUsedAt));
+  for (const host of recent) {
+    if (ids.length >= 6) break;
+    ids.push(host.id);
+  }
+  return ids.slice(0, 6).map((id) => state.profile.hosts.find((host) => host.id === id)).filter(Boolean);
 }
 
-function groupNodeHTML(group) {
-  const kids = childGroups(group.id);
-  const hosts = hostsInGroup(group.id);
-  const open = state.expanded.has(group.id);
-  const total = hosts.length + kids.reduce((n, g) => n + hostsInGroup(g.id).length, 0);
-  if (state.filter && hosts.length === 0 && kids.length === 0) return "";
+function renderRecentHosts() {
+  const box = $("#recent-hosts");
+  if (!box) return;
+  const hosts = recentHosts();
+  box.innerHTML = hosts.length
+    ? hosts
+        .map((host) => {
+          const live = state.tabs.some((tab) => tab.hostId === host.id && tab.status === "connected");
+          return `<button class="side-host" type="button" data-recent="${esc(host.id)}" title="${esc(host.username)}@${esc(host.address)}:${host.port} · 打开终端">
+            <span class="side-host-icon">${hostSymbol(host)}</span>
+            <span class="side-host-text">
+              <span class="side-host-name">${esc(host.name || host.address)}</span>
+              <span class="side-host-addr">${esc(host.username)}@${esc(host.address)}</span>
+            </span>
+            <span class="side-host-dot ${live ? "is-live" : ""}"></span>
+          </button>`;
+        })
+        .join("")
+    : `<div class="side-empty">还没有连接记录<span>双击右侧主机即可开始</span></div>`;
+}
 
-  return `
-    <div class="group-node">
-      <div class="group-head" tabindex="0" aria-expanded="${open}" data-group="${esc(group.id)}" data-sort-group="${esc(group.id)}" draggable="true" title="拖动调整同级分组顺序">
-        <span class="group-caret ${open ? "open" : ""}">${icon("chevron")}</span>
-        <span>${esc(group.name)}</span>
-        <span class="group-count">${total}</span>
-        <button class="icon-btn" data-act="edit-group" title="重命名分组">${icon("edit")}</button>
-        <button class="icon-btn" data-act="del-group" title="删除分组">${icon("close")}</button>
+/** 同一台主机已经开着终端就直接切过去，不再多挂一个会话。 */
+function openHostSession(host) {
+  const tab = state.tabs.find((t) => t.hostId === host.id && t.kind === "terminal" && t.status !== "closed");
+  if (tab) return setActiveTab(tab.id);
+  openTerminalTab(host);
+}
+
+/* ------------------------------------------------------------ 快捷指令 */
+
+const SNIPPET_KEY = "xssh:snippets";
+
+function loadSnippets() {
+  try {
+    const list = JSON.parse(localStorage.getItem(SNIPPET_KEY) || "[]");
+    return Array.isArray(list) ? list.filter((item) => item?.id && item?.command) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSnippets() {
+  try {
+    localStorage.setItem(SNIPPET_KEY, JSON.stringify(state.snippets));
+  } catch {
+    // 存不下就只在本次运行内生效
+  }
+}
+
+function renderSnippets() {
+  const box = $("#snippets");
+  if (!box) return;
+  box.innerHTML = state.snippets.length
+    ? state.snippets
+        .map(
+          (snippet) => `<div class="snippet" role="button" tabindex="0" data-snippet="${esc(snippet.id)}" title="${esc(snippet.command)}">
+            <span class="snippet-main">
+              <span class="snippet-name">${esc(snippet.name || snippet.command)}</span>
+              <span class="snippet-cmd">${esc(snippet.command)}</span>
+            </span>
+            <span class="snippet-actions">
+              <button class="icon-btn" data-act="edit-snippet" title="编辑">${icon("edit")}</button>
+              <button class="icon-btn" data-act="del-snippet" title="删除">${icon("trash")}</button>
+            </span>
+          </div>`
+        )
+        .join("")
+    : `<div class="side-empty">常用命令放这里<span>点右上角 + 添加，一键发送到当前终端</span></div>`;
+}
+
+function runSnippet(snippet) {
+  const tab = activeTab();
+  if (tab?.kind === "terminal" && tab.status === "connected" && tab.sessionId) {
+    WriteSession(tab.sessionId, bytesToB64(new TextEncoder().encode(snippet.command + "\r"))).catch((err) =>
+      fail(err, "发送指令失败")
+    );
+    tab.term?.focus();
+    return;
+  }
+  toast("先打开一个终端会话，再执行快捷指令。", "info", 3000);
+}
+
+async function snippetEditor(snippet) {
+  const editing = Boolean(snippet);
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal" style="width:480px">
+      <div class="modal-head">${editing ? "编辑快捷指令" : "新建快捷指令"}</div>
+      <div class="modal-body">
+        <div class="field"><label>名称</label>
+          <input type="text" data-f="name" value="${esc(snippet?.name || "")}" placeholder="例如：查看程序目录" />
+        </div>
+        <div class="field"><label>命令</label>
+          <input type="text" data-f="command" value="${esc(snippet?.command || "")}" placeholder="例如：cd /home/app && ls -al" />
+          <div class="hint">发送时自动补一个回车，直接在终端里执行。</div>
+        </div>
       </div>
-      <div class="group-body" style="${open ? "" : "display:none"}">
-        ${kids.map(groupNodeHTML).join("")}
-        ${hosts.map(hostRowHTML).join("")}
+      <div class="modal-foot">
+        <button class="btn" data-act="cancel">取消</button>
+        <button class="btn btn-primary" data-act="ok">保存</button>
       </div>
     </div>`;
+  const nameInput = backdrop.querySelector('[data-f="name"]');
+  const commandInput = backdrop.querySelector('[data-f="command"]');
+  const submit = () => {
+    const command = commandInput.value.trim();
+    if (!command) return toast("命令不能为空。", "info", 2500);
+    const item = {
+      id: snippet?.id || `snip-${Date.now().toString(36)}`,
+      name: nameInput.value.trim(),
+      command,
+    };
+    const index = state.snippets.findIndex((entry) => entry.id === item.id);
+    if (index >= 0) state.snippets[index] = item;
+    else state.snippets.push(item);
+    saveSnippets();
+    renderSnippets();
+    backdrop.remove();
+  };
+  backdrop.addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "ok") submit();
+    else if (act === "cancel" || e.target === backdrop) backdrop.remove();
+  });
+  backdrop.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.matches("input")) submit();
+    if (e.key === "Escape") backdrop.remove();
+  });
+  $("#modal-root").appendChild(backdrop);
+  (editing ? commandInput : nameInput).focus();
+}
+
+async function deleteSnippet(snippet) {
+  const ok = await confirmDialog({
+    title: "删除快捷指令",
+    message: `确定删除“${snippet.name || snippet.command}”？`,
+    confirmLabel: "删除",
+  });
+  if (!ok) return;
+  state.snippets = state.snippets.filter((entry) => entry.id !== snippet.id);
+  saveSnippets();
+  renderSnippets();
 }
 
 function renderSidebar() {
-  const ungrouped = hostsInGroup("");
-  const roots = childGroups("");
-  const html = [];
-
-  if (roots.length === 0 && ungrouped.length === 0) {
-    html.push(
-      `<div class="tree-empty">${
-        state.filter ? "没有匹配的主机" : "还没有主机"
-      }</div>`
-    );
-  } else {
-    html.push(roots.map(groupNodeHTML).join(""));
-    if (ungrouped.length) {
-      html.push(
-        `<div class="group-head" style="cursor:default"><span class="group-caret"></span><span>未分组</span><span class="group-count">${ungrouped.length}</span></div>`
-      );
-      html.push(ungrouped.map(hostRowHTML).join(""));
-    }
-  }
-  $("#tree").innerHTML = html.join("");
-  $("#host-count").textContent = state.profile.hosts.length;
+  renderRecentHosts();
+  renderSnippets();
   renderDashboard();
 }
 
@@ -481,6 +670,8 @@ function hostItemHTML(host) {
   const shownTags = tags.slice(0, 2).map((tag) => `<span class="host-tag">${esc(tag)}</span>`).join("");
   const moreTags = tags.length > 2 ? `<span class="host-tag is-more">+${tags.length - 2}</span>` : "";
   const lastUsed = relativeTime(host.lastUsedAt);
+  // 24 小时内用过的单独上色：在一列灰字里，最近的那几台一眼能挑出来
+  const fresh = host.lastUsedAt && Date.now() - new Date(host.lastUsedAt).getTime() < 86400e3;
   const lastTitle = host.lastUsedAt
     ? new Date(host.lastUsedAt).toLocaleString("zh-CN")
     : "从未连接";
@@ -492,13 +683,36 @@ function hostItemHTML(host) {
     </span>
     <span class="host-item-address" title="${esc(host.username)}@${esc(host.address)}:${host.port}">${addressHTML(host)}</span>
     <span class="host-item-tags">${shownTags}${moreTags}</span>
-    <span class="host-item-last" title="${esc(lastTitle)}">${esc(lastUsed)}</span>
+    <span class="host-item-last ${fresh ? "is-recent" : ""}" title="${esc(lastTitle)}">${esc(lastUsed)}</span>
     <span class="host-item-actions">
       <button class="btn btn-sm host-connect" data-act="terminal" title="连接 ${esc(name)}" aria-label="连接 ${esc(name)}">连接</button>
       <button class="icon-btn" data-act="sftp" title="文件" aria-label="管理 ${esc(name)} 的文件">${icon("folder")}</button>
       <button class="icon-btn" data-act="edit" title="编辑" aria-label="编辑 ${esc(name)}">${icon("edit")}</button>
     </span>
   </article>`;
+}
+
+/* 页头四个概览格子：数量的变化比一整片表格更容易一眼扫到 */
+function dashboardStatsHTML(hosts) {
+  const groups = state.profile.groups.filter((group) => hosts.some((host) => host.groupId === group.id)).length;
+  const live = state.tabs.filter((tab) => tab.kind === "terminal" && tab.status === "connected").length;
+  const recent = hosts.filter(
+    (host) => host.lastUsedAt && Date.now() - new Date(host.lastUsedAt).getTime() < 7 * 86400e3
+  ).length;
+  const tiles = [
+    { tone: "primary", icon: "server", label: "主机", value: hosts.length },
+    { tone: "violet", icon: "layers", label: "分组", value: groups },
+    { tone: "mint", icon: "terminal", label: "活动会话", value: live },
+    { tone: "amber", icon: "refresh", label: "近 7 天用过", value: recent },
+  ];
+  return tiles
+    .map(
+      (tile) => `<div class="stat-card" data-tone="${tile.tone}">
+      <span class="stat-icon">${icon(tile.icon)}</span>
+      <span class="stat-text"><span class="stat-value">${tile.value}</span><span class="stat-label">${tile.label}</span></span>
+    </div>`
+    )
+    .join("");
 }
 
 function renderDashboard() {
@@ -510,15 +724,31 @@ function renderDashboard() {
     grouped.get(id).push(host);
   }
   const sections = [];
+  const tones = ["primary", "violet", "mint", "amber"];
+  // 一台主机都没打标签时，整列标签就是纯空白，不如让地址和时间更靠左一步
+  const hasTags = hosts.some((host) => (host.tags || []).length);
   const addSection = (id, name) => {
     const members = (grouped.get(id) || []).sort((a, b) => (a.order || 0) - (b.order || 0));
-    if (!members.length) return;
-    sections.push(`<section class="host-group" aria-label="${esc(name)}">
+    // 搜索时只留有命中的分组；平时空分组也保留，否则没有地方重命名/删除它
+    if (!members.length && (!id || state.filter)) return;
+    // 分组色点、行图标、标签共用同一个 --tone，扫一眼就能把行和分组对上
+    const tone = tones[sections.length % tones.length];
+    sections.push(`<section class="host-group" data-tone="${tone}" aria-label="${esc(name)}">
       <div class="host-group-heading" ${id ? `data-sort-group="${esc(id)}" draggable="true" title="拖动调整同级分组顺序"` : ""}>
         <h3 title="${esc(name)}">${esc(name)}</h3>
         <span class="count">${members.length} 台</span>
+        ${
+          id
+            ? `<span class="host-group-actions">
+          <button class="icon-btn" type="button" data-act="edit-group" data-group="${esc(id)}" title="重命名分组">${icon("edit")}</button>
+          <button class="icon-btn" type="button" data-act="del-group" data-group="${esc(id)}" title="删除分组">${icon("close")}</button>
+        </span>`
+            : ""
+        }
       </div>
-      <div class="host-list">${members.map(hostItemHTML).join("")}</div>
+      <div class="host-list">${
+        members.length ? members.map(hostItemHTML).join("") : `<div class="host-empty">该分组还没有主机</div>`
+      }</div>
     </section>`);
   };
   const visitGroups = (parentId, path = []) => {
@@ -531,9 +761,11 @@ function renderDashboard() {
   };
   visitGroups("");
   addSection("", "未分组");
-  $("#host-grid").innerHTML = hosts.length ? `<div class="host-table">
+  $("#dashboard-stats").innerHTML = dashboardStatsHTML(hosts);
+  const showTable = hosts.length > 0 || (!state.filter && state.profile.groups.length > 0);
+  $("#host-grid").innerHTML = showTable ? `<div class="host-table ${hasTags ? "" : "no-tags"}">
     <div class="host-table-head" aria-hidden="true">
-      <span>主机</span><span>地址</span><span>标签</span><span>最近连接</span><span></span>
+      <span>主机</span><span>地址</span>${hasTags ? "<span>标签</span>" : ""}<span>最近连接</span><span>操作</span>
     </div>
     ${sections.join("")}
   </div>` : `<div class="onboarding">
@@ -576,9 +808,10 @@ function renderTabstrip() {
   $("#panes").classList.toggle("hidden", !current);
   $("#btn-back").hidden = !current;
   $("#workspace-title").textContent = current ? current.title : "主机管理";
+  // 主机页的数量已经由概览卡承担，这里再报一遍只会重复，改成说明性文案
   $("#workspace-context").textContent = current
     ? `${current.kind === "sftp" ? "文件传输" : "SSH 终端"} / ${tabStatusLabel(current)}`
-    : `共 ${state.profile.hosts.length} 台主机 · ${state.profile.groups.length} 个分组`;
+    : "本地工作区 · 双击主机直接连接";
   const connected = state.tabs.filter((tab) => tab.status === "connected").length;
   $("#session-chip-text").textContent = state.tabs.length
     ? `${connected} / ${state.tabs.length} 会话`
@@ -637,6 +870,8 @@ function closeTab(id) {
   } else if (tab.kind === "sftp" && tab.sessionId) {
     SftpClose(tab.sessionId).catch(() => {});
   }
+  // 终端标签页点文件时按需开的 SFTP 通道，关标签时一并释放。
+  if (tab.editorSessionId) SftpClose(tab.editorSessionId).catch(() => {});
   if (tab.monitor) stopMonitor(tab);
   tab.term?.dispose();
   tab.paneEl?.remove();
@@ -946,6 +1181,153 @@ function osc7Cwd(data) {
   }
 }
 
+/**
+ * 打开文件管理时用哪个目录。
+ *
+ * 首选 OSC 7（准确）；绝大多数服务器默认没开，所以再从提示符兜一层：
+ * 只认"光标那一行整行就是提示符"的情况（没在输入命令），
+ * 形如 root@host:/home/x# 或 user@host:~$（bash 的 \w、zsh 的 %~ 都是这个形状）。
+ * 读不到的（比如 [root@host ~]# 这种只有目录名的）就交给上一次浏览的目录。
+ */
+function shellCwd(tab) {
+  if (tab.cwd) return tab.cwd;
+  const buffer = tab.term?.buffer?.active;
+  if (!buffer) return "";
+  // 提示符很长时会折行，先从光标行往回把折行部分接起来再匹配
+  const end = buffer.baseY + buffer.cursorY;
+  let start = end;
+  while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
+  let line = "";
+  for (let i = start; i <= end; i++) line += buffer.getLine(i)?.translateToString(true) ?? "";
+  const match = /^[^\s@]+@[^\s:]+:(.+?)[#$%>]\s*$/.exec(line);
+  const path = match?.[1]?.trim() || "";
+  // 相对路径 / 只有一个目录名时没法定位，宁可退回首页
+  return path === "/" || path.startsWith("~") || path.startsWith("/") ? path : "";
+}
+
+/**
+ * 终端里的文件链接。
+ *
+ * 只把"带已知扩展名的 token"变成链接（扩展名沿用文件列表那张表），
+ * 目录、版本号、命令参数不会被误伤；路径/文件名都按当前提示符目录解析。
+ * 行内的全角字符占两格，所以先把字符串下标映射回单元格列，链接下划线才不会错位。
+ */
+let terminalFileRe = null;
+
+function terminalFileLinks(term, y, open) {
+  const line = term.buffer.active.getLine(y - 1);
+  if (!line) return undefined;
+  if (!terminalFileRe) {
+    const exts = [...fileKinds.code, ...fileKinds.config, ...fileKinds.doc];
+    const name = "[\\p{L}\\p{N}._@%+\\-]";
+    terminalFileRe = new RegExp(
+      `(?:~\\/|\\.{1,2}\\/|\\/)?(?:${name}+\\/)*${name}+\\.(?:${exts.join("|")})\\b`,
+      "giu"
+    );
+  }
+
+  let text = "";
+  const columns = [];
+  for (let x = 0; x < line.length; x++) {
+    const cell = line.getCell(x);
+    if (!cell) break;
+    if (cell.getWidth() === 0) continue;
+    const chars = cell.getChars() || " ";
+    for (let i = 0; i < chars.length; i++) columns.push(x + 1);
+    text += chars;
+  }
+
+  const links = [];
+  for (const match of text.matchAll(terminalFileRe)) {
+    const start = match.index;
+    const end = start + match[0].length - 1;
+    if (!columns[start] || !columns[end] || insideUrl(text, start)) continue;
+    links.push({
+      range: { start: { x: columns[start], y }, end: { x: columns[end], y } },
+      text: match[0],
+      decorations: { pointerCursor: true, underline: true },
+      activate: () => open(match[0]),
+    });
+  }
+  return links.length ? links : undefined;
+}
+
+/** 匹配词落在 URL 里时不当文件处理（网页链接交给 WebLinksAddon）。 */
+function insideUrl(text, index) {
+  let start = index;
+  while (start > 0 && !/\s/.test(text[start - 1])) start--;
+  return text.slice(start, index).includes("://");
+}
+
+/** 编辑器用的 SFTP 通道：SFTP 标签页现成，终端标签页第一次点文件时按需开一条并缓存。 */
+async function editorSession(tab) {
+  if (tab.kind === "sftp") {
+    if (!tab.sessionId) throw new Error("SFTP 尚未连接。");
+    return tab.sessionId;
+  }
+  if (tab.editorSessionId) return tab.editorSessionId;
+  if (tab.editorSessionPending) return tab.editorSessionPending;
+  const host = state.profile.hosts.find((h) => h.id === tab.hostId);
+  if (!host) throw new Error("主机不存在。");
+  tab.editorSessionPending = withHostKeyConfirm(() => SftpOpen(host.id))
+    .then((sessionId) => {
+      tab.editorSessionId = sessionId;
+      return sessionId;
+    })
+    .finally(() => {
+      tab.editorSessionPending = null;
+    });
+  return tab.editorSessionPending;
+}
+
+/** 把终端里的相对路径按提示符目录拼成绝对路径；定位不到返回空串。 */
+async function resolveTerminalPath(tab, raw, sessionId) {
+  if (raw.startsWith("~/")) {
+    try {
+      return (await SftpHome(sessionId)) + raw.slice(1);
+    } catch {
+      return "";
+    }
+  }
+  if (raw.startsWith("/")) return raw;
+  let cwd = tab.cwd || shellCwd(tab);
+  if (!cwd) return "";
+  if (cwd.startsWith("~")) {
+    try {
+      cwd = (await SftpHome(sessionId)) + cwd.slice(1);
+    } catch {
+      return "";
+    }
+  }
+  if (!cwd.startsWith("/")) return "";
+  const parts = [];
+  for (const part of `${cwd}/${raw}`.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+}
+
+async function openTerminalFile(tab, raw) {
+  // 双击会触发两次 click；首次读取还没回来时忽略重复请求，免得叠两个编辑器。
+  if (tab.editorBusy) return;
+  tab.editorBusy = true;
+  try {
+    let sessionId;
+    try {
+      sessionId = await editorSession(tab);
+    } catch (err) {
+      return fail(err, "连接 SFTP 失败");
+    }
+    const path = await resolveTerminalPath(tab, raw, sessionId);
+    if (!path) return toast("读不到当前目录，无法定位这个文件。", "info", 4000);
+    await openRemoteFile(tab, { name: path.slice(path.lastIndexOf("/") + 1) || path, path, isDir: false });
+  } finally {
+    tab.editorBusy = false;
+  }
+}
+
 function openTerminalTab(host) {
   const tab = {
     id: nextTabId(),
@@ -972,7 +1354,17 @@ function openTerminalTab(host) {
     </div>
     <div class="term-banner" data-banner style="display:none"></div>
     <div class="term-split">
-      <div class="term-host"><div class="term-fit" data-termhost></div></div>
+      <div class="term-host">
+        <div class="term-find" data-find hidden>
+          <input class="term-find-input" data-find-input spellcheck="false" autocomplete="off"
+            placeholder="在终端中查找" aria-label="在终端中查找" />
+          <span class="term-find-count" data-find-count></span>
+          <button class="icon-btn" data-act="find-prev" title="上一个（Shift+Enter）" aria-label="上一个匹配">${icon("up")}</button>
+          <button class="icon-btn" data-act="find-next" title="下一个（Enter）" aria-label="下一个匹配">${icon("down")}</button>
+          <button class="icon-btn" data-act="find-close" title="关闭（Esc）" aria-label="关闭查找">${icon("close")}</button>
+        </div>
+        <div class="term-fit" data-termhost></div>
+      </div>
       <aside class="monitor hidden" data-monitor>
         <div class="monitor-head">
           <span class="monitor-title">${icon("monitor")}系统监控</span>
@@ -985,14 +1377,17 @@ function openTerminalTab(host) {
   tab.paneEl = pane;
 
   pane.addEventListener("click", (e) => {
-    if (e.target.closest('[data-act="open-sftp"]')) openSftpTab(host, { remotePath: tab.cwd });
-    else if (e.target.closest('[data-act="toggle-monitor"]')) toggleMonitor(tab);
-    else if (e.target.closest('[data-act="close-monitor"]')) toggleMonitor(tab);
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "open-sftp") openSftpTab(host, { remotePath: shellCwd(tab) });
+    else if (act === "toggle-monitor" || act === "close-monitor") toggleMonitor(tab);
+    else if (act === "find-prev") runTermFind(-1);
+    else if (act === "find-next") runTermFind(1);
+    else if (act === "find-close") closeTermFind();
   });
 
   const term = new Terminal({
     fontFamily: cssVar("--mono", 'Consolas, "Microsoft YaHei UI", monospace'),
-    fontSize: cssPx("--fs-md", 14),
+    fontSize: state.termFontSize,
     lineHeight: 1.2,
     cursorBlink: true,
     allowProposedApi: true,
@@ -1025,6 +1420,22 @@ function openTerminalTab(host) {
         event.preventDefault();
         return false;
       }
+      if (modifier && (key === "=" || key === "+")) {
+        // 和浏览器一致：Ctrl+= 放大，Ctrl+- 缩小，Ctrl+0 复位。
+        event.preventDefault();
+        setTermFontSize(state.termFontSize + 1);
+        return false;
+      }
+      if (modifier && key === "-") {
+        event.preventDefault();
+        setTermFontSize(state.termFontSize - 1);
+        return false;
+      }
+      if (modifier && key === "0") {
+        event.preventDefault();
+        setTermFontSize(cssPx("--fs-md", 14));
+        return false;
+      }
     }
     // Workspace shortcuts must not also send control characters to the shell.
     return !(event.ctrlKey || event.metaKey) || !["f", "k", "w"].includes(event.key.toLowerCase());
@@ -1032,9 +1443,76 @@ function openTerminalTab(host) {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new WebLinksAddon());
+  const search = new SearchAddon();
+  term.loadAddon(search);
+  // 终端输出里的文件名（如 ll 列表）单击就能用内置编辑器打开。
+  term.registerLinkProvider({
+    provideLinks: (y, callback) => callback(terminalFileLinks(term, y, (raw) => openTerminalFile(tab, raw))),
+  });
   term.open(pane.querySelector("[data-termhost]"));
   tab.term = term;
   tab.fit = fit;
+
+  /* ----------------------------------------------------- terminal search */
+  const findBar = pane.querySelector("[data-find]");
+  const findInput = pane.querySelector("[data-find-input]");
+  const findCount = pane.querySelector("[data-find-count]");
+
+  search.onDidChangeResults(({ resultIndex, resultCount }) => {
+    findCount.textContent = resultCount ? `${resultIndex < 0 ? 1 : resultIndex + 1}/${resultCount}` : "无结果";
+    findCount.classList.toggle("is-empty", !resultCount);
+  });
+
+  function runTermFind(step) {
+    const text = findInput.value;
+    if (!text) {
+      search.clearDecorations();
+      findCount.textContent = "";
+      return;
+    }
+    // incremental 只在 findNext 生效：打字时扩展当前命中，不会一路跳到下一个词。
+    const options = { caseSensitive: false, incremental: step > 0 };
+    if (step > 0) search.findNext(text, options);
+    else search.findPrevious(text, options);
+  }
+
+  function openTermFind() {
+    findBar.hidden = false;
+    findInput.focus();
+    findInput.select();
+    runTermFind(1);
+  }
+
+  function closeTermFind() {
+    findBar.hidden = true;
+    search.clearDecorations();
+    findCount.textContent = "";
+    term.focus();
+  }
+
+  tab.openFind = openTermFind;
+
+  findInput.addEventListener("input", () => runTermFind(1));
+  findInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      runTermFind(e.shiftKey ? -1 : 1);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeTermFind();
+    }
+  });
+
+  // Ctrl+滚轮缩放字号，和浏览器里把网页放大是同一套手势。
+  pane.querySelector(".term-host").addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setTermFontSize(state.termFontSize + (e.deltaY < 0 ? 1 : -1));
+    },
+    { passive: false }
+  );
 
   // Progressive enhancement: use the shell's real cwd if it supports OSC 7.
   // Otherwise openSftpTab falls back to the last directory browsed on this host.
@@ -1154,6 +1632,7 @@ function applyState(tab, info) {
     tab.term?.write(`\r\n\x1b[38;5;245m— 会话已关闭${info.error ? `：${info.error}` : ""} —\x1b[0m\r\n`);
   }
   renderTabstrip();
+  renderRecentHosts();
 }
 
 /**
@@ -1192,6 +1671,7 @@ function openSftpTab(host, options = {}) {
     remoteSel: null,
     localError: "",
     remoteError: "",
+    bookmarks: loadBookmarks(host.id),
   };
 
   const pane = document.createElement("div");
@@ -1217,21 +1697,26 @@ function openSftpTab(host, options = {}) {
           <button class="icon-btn" data-act="rename" title="重命名">${icon("edit")}</button>
           <button class="icon-btn" data-act="delete" title="删除">${icon("trash")}</button>
         </div>
-        <div class="sftp-columns"><span>名称</span><span class="c-size">大小</span><span class="c-date">修改时间</span></div>
+        <div class="sftp-columns"><span>名称</span><span class="c-mode">权限</span><span class="c-size">大小</span><span class="c-date">修改时间</span></div>
         <div class="file-list" data-list></div>
       </section>
       <section class="sftp-pane" data-side="remote">
-        <div class="sftp-side-label">${icon("server")} 远程文件 <span>${esc(host.name || host.address)}</span></div>
+        <div class="sftp-side-label">${icon("server")} 远程文件
+          <select class="sftp-bookmarks" data-bookmarks aria-label="目录书签" title="常用目录书签"></select>
+          <span>${esc(host.name || host.address)}</span>
+        </div>
         <div class="sftp-pane-head">
           <button class="icon-btn" data-act="up" title="上一级目录">${icon("up")}</button>
           <button class="icon-btn" data-act="refresh" title="刷新">${icon("refresh")}</button>
           <input class="sftp-path" data-path spellcheck="false" aria-label="远程路径" />
+          <button class="icon-btn" data-act="star" title="收藏 / 取消收藏当前目录">${icon("star")}</button>
+          <button class="icon-btn" data-act="chmod" title="修改选中项的权限">${icon("lock")}</button>
           <button class="icon-btn" data-act="mkdir" title="新建文件夹">${icon("folderPlus")}</button>
           <button class="icon-btn" data-act="rename" title="重命名">${icon("file")}</button>
           <button class="icon-btn" data-act="edit" title="编辑文本文件">${icon("edit")}</button>
           <button class="icon-btn" data-act="delete" title="删除">${icon("trash")}</button>
         </div>
-        <div class="sftp-columns"><span>名称</span><span class="c-size">大小</span><span class="c-date">修改时间</span></div>
+        <div class="sftp-columns"><span>名称</span><span class="c-mode">权限</span><span class="c-size">大小</span><span class="c-date">修改时间</span></div>
         <div class="file-list" data-list></div>
       </section>
     </div>`;
@@ -1244,15 +1729,21 @@ function openSftpTab(host, options = {}) {
   wireSftpPane(tab, "local");
   wireSftpPane(tab, "remote");
 
-  // Local pane starts at the user's disk root, while the dropdown exposes all
-  // mounted Windows drives for quick navigation.
+  // Local pane starts at the directory picked in settings, otherwise at the
+  // drive the user's home lives on; the dropdown still exposes every drive.
   Promise.all([LocalHome(), LocalDrives()])
     .then(([home, drives]) => {
       tab.localDrives = drives || [];
-      const drive = tab.localDrives.find((root) => home.toLowerCase().startsWith(root.toLowerCase())) || tab.localDrives[0];
-      tab.localPath = drive || home;
+      tab.localPath = state.localStart || defaultLocalDir(home, tab.localDrives);
       renderDriveSelect(tab);
-      return refreshSide(tab, "local");
+      return refreshSide(tab, "local").then(() => {
+        if (tab.disposed || !tab.localError) return;
+        // 设置的目录可能被删掉或换了盘，退回系统默认，别让面板停在错误上
+        tab.localPath = defaultLocalDir(home, tab.localDrives);
+        tab.localError = "";
+        renderDriveSelect(tab);
+        return refreshSide(tab, "local");
+      });
     })
     .catch((err) => fail(err, "读取本地文件失败"));
 
@@ -1295,7 +1786,10 @@ function openSftpTab(host, options = {}) {
  * login directory instead of leaving the pane stuck on an error.
  */
 async function openRemoteStart(tab, home) {
-  const preferred = tab.remotePath;
+  // 提示符里读到的是 ~/xxx，SFTP 不认 ~，换成真实的登录目录
+  const preferred = tab.remotePath?.startsWith("~")
+    ? home + tab.remotePath.slice(1)
+    : tab.remotePath;
   tab.remotePath = preferred || home;
   await refreshSide(tab, "remote");
 
@@ -1310,9 +1804,15 @@ function wireSftpPane(tab, side) {
   const pathInput = pane.querySelector("[data-path]");
   const list = pane.querySelector("[data-list]");
   const drives = pane.querySelector("[data-drives]");
+  const bookmarks = pane.querySelector("[data-bookmarks]");
 
   drives?.addEventListener("change", (e) => {
     if (side === "local" && e.target.value) navigate(tab, side, e.target.value);
+  });
+
+  bookmarks?.addEventListener("change", (e) => {
+    const target = e.target.value;
+    if (target) navigate(tab, side, target).then(() => renderBookmarks(tab));
   });
 
   pathInput.addEventListener("keydown", (e) => {
@@ -1333,6 +1833,13 @@ function wireSftpPane(tab, side) {
       case "refresh":
         refreshSide(tab, side);
         break;
+      case "star":
+        toggleBookmark(tab, current);
+        break;
+      case "chmod":
+        if (!sel) return toast("请先选择要修改权限的文件或文件夹。", "info", 2500);
+        chmodPrompt(tab, sel);
+        break;
       case "mkdir":
         mkdirPrompt(tab, side, current);
         break;
@@ -1344,7 +1851,7 @@ function wireSftpPane(tab, side) {
         if (side !== "remote") return toast("只能编辑远程文件，本地文件请用系统编辑器打开。", "info", 3000);
         if (!sel) return toast("请先选择要编辑的文件。", "info", 2500);
         if (sel.isDir) return toast("文件夹不能编辑。", "info", 2500);
-        openTextEditor(tab, sel);
+        openRemoteFile(tab, sel);
         break;
       case "delete":
         if (!sel) return toast("请先选择要删除的文件或文件夹。", "info", 2500);
@@ -1365,18 +1872,25 @@ function wireSftpPane(tab, side) {
       if (e.detail <= 1) navigate(tab, side, entry.path);
       return;
     }
+    // 文件名就是"打开"入口：目录单击进目录，远程文件单击开内置编辑器，
+    // 和双击整行、工具栏的编辑按钮是同一个动作。行内其它位置单击仍然是选中。
+    if (e.target.closest("[data-open-file]")) {
+      selectFile(entry);
+      if (side === "remote" && !entry.isDir && e.detail <= 1) openRemoteFile(tab, entry);
+      return;
+    }
     selectFile(entry);
   });
 
   list.addEventListener("dblclick", (e) => {
-    if (e.target.closest("[data-open-dir]")) return;
+    if (e.target.closest("[data-open-dir], [data-open-file]")) return;
     const row = e.target.closest("[data-name]");
     if (!row) return;
     const entry = tab[`${side}Entries`].find((x) => x.name === row.dataset.name);
     if (entry?.isDir) navigate(tab, side, entry.path);
     // Double-click a remote file opens the built-in editor; that is the common
     // "fix this config" path and saves a download/edit/upload round trip.
-    else if (entry && side === "remote") openTextEditor(tab, entry);
+    else if (entry && side === "remote") openRemoteFile(tab, entry);
   });
 
   list.addEventListener("keydown", (e) => {
@@ -1397,6 +1911,7 @@ function wireSftpPane(tab, side) {
     const entry = tab[`${side}Entries`].find((x) => x.name === e.target.dataset.name);
     if (!entry) return;
     if (e.key === "Enter" && entry.isDir) navigate(tab, side, entry.path);
+    else if (e.key === "Enter" && side === "remote" && !entry.isDir) openRemoteFile(tab, entry);
     else selectFile(entry);
   });
 
@@ -1478,6 +1993,11 @@ function renderDriveSelect(tab) {
   if (selected) select.value = selected;
 }
 
+/** 家目录所在的盘（用户文件大多在那儿），没有就第一块盘。 */
+function defaultLocalDir(home, drives) {
+  return drives.find((root) => home.toLowerCase().startsWith(root.toLowerCase())) || drives[0] || home;
+}
+
 async function refreshSide(tab, side) {
   if (side === "remote" && !tab.sessionId) return;
   const target = tab[`${side}Path`] || (await (side === "local" ? LocalHome() : SftpHome(tab.sessionId)));
@@ -1541,6 +2061,7 @@ function renderFileList(tab, side) {
 
   if (pathInput.value !== current) pathInput.value = current;
   if (side === "local") renderDriveSelect(tab);
+  else renderBookmarks(tab);
 
   if (error) {
     list.innerHTML = `<div class="file-list-empty">${esc(error)}</div>`;
@@ -1555,14 +2076,80 @@ function renderFileList(tab, side) {
   list.innerHTML = entries
     .map(
       (entry) => `
-        <div class="file-row ${entry.name === selected ? "selected" : ""}" data-name="${esc(entry.name)}" draggable="true" tabindex="0" title="${entry.isDir ? "单击名称或双击此行打开；拖到另一侧传输" : "拖到另一侧传输"}；单击选中">
+        <div class="file-row ${entry.name === selected ? "selected" : ""}" data-name="${esc(entry.name)}" draggable="true" tabindex="0" title="${entry.isDir ? "单击名称或双击此行打开；拖到另一侧传输" : side === "remote" ? "单击名称或双击此行打开编辑；拖到另一侧传输" : "拖到另一侧传输"}；单击选中">
         <span class="file-icon ${entry.isDir ? "is-directory" : fileKindClass(entry.name)}">${icon(entry.isDir ? "folder" : "file")}</span>
-        ${entry.isDir ? `<button class="file-name directory-open" data-open-dir title="打开 ${esc(entry.name)}" aria-label="打开目录 ${esc(entry.name)}">${esc(entry.name)}</button>` : `<span class="file-name" title="${esc(entry.name)}">${esc(entry.name)}</span>`}
+        ${entry.isDir
+          ? `<button class="file-name directory-open" data-open-dir title="打开 ${esc(entry.name)}" aria-label="打开目录 ${esc(entry.name)}">${esc(entry.name)}</button>`
+          : side === "remote"
+            ? `<button class="file-name file-open" data-open-file title="单击打开编辑 ${esc(entry.name)}" aria-label="编辑文件 ${esc(entry.name)}">${esc(entry.name)}</button>`
+            : `<span class="file-name" title="${esc(entry.name)}">${esc(entry.name)}</span>`}
+        <span class="file-mode" title="${esc(entry.mode || "")}">${esc(entry.mode || "")}</span>
         <span class="file-size">${entry.isDir ? "" : humanSize(entry.size)}</span>
         <span class="file-date">${esc(entry.modTime)}</span>
       </div>`
     )
     .join("");
+}
+
+/** 书签下拉：当前目录在列表里就选中，星标跟着亮，一眼看出收没收藏。 */
+function renderBookmarks(tab) {
+  const pane = tab.paneEl?.querySelector('[data-side="remote"]');
+  const select = pane?.querySelector("[data-bookmarks]");
+  if (!select) return;
+  const current = tab.remotePath || "";
+  const saved = tab.bookmarks.includes(current);
+  select.innerHTML = [
+    `<option value="">书签…</option>`,
+    ...tab.bookmarks.map((item) => `<option value="${esc(item)}">${esc(item)}</option>`),
+  ].join("");
+  select.value = saved ? current : "";
+  const star = pane.querySelector('[data-act="star"]');
+  star?.classList.toggle("is-on", saved);
+  star?.setAttribute("title", saved ? "取消收藏当前目录" : "收藏当前目录");
+}
+
+function toggleBookmark(tab, current) {
+  if (!current) return;
+  tab.bookmarks = tab.bookmarks.includes(current)
+    ? tab.bookmarks.filter((item) => item !== current)
+    : [...tab.bookmarks, current].sort((a, b) => a.localeCompare(b));
+  saveBookmarks(tab.hostId, tab.bookmarks);
+  renderBookmarks(tab);
+}
+
+/** 从 `-rwxr-xr-x` 反推八进制，作为权限输入框的默认值。 */
+function octalFromMode(mode) {
+  const text = String(mode || "");
+  if (text.length < 10) return "";
+  const perms = text.slice(1, 10);
+  let digits = "";
+  for (let group = 0; group < 3; group++) {
+    const [read, write, exec] = perms.slice(group * 3, group * 3 + 3);
+    digits += String((read === "r" ? 4 : 0) + (write === "w" ? 2 : 0) + (/[xst]/.test(exec) ? 1 : 0));
+  }
+  // setuid / setgid / sticky 是第四位，普通 chmod 很少用，但不该被丢掉
+  const special =
+    (/[sS]/.test(perms[2]) ? 4 : 0) + (/[sS]/.test(perms[5]) ? 2 : 0) + (/[tT]/.test(perms[8]) ? 1 : 0);
+  return special ? `${special}${digits}` : digits;
+}
+
+async function chmodPrompt(tab, entry) {
+  if (!tab.sessionId) return toast("SFTP 尚未连接。", "error");
+  const input = await promptDialog({
+    title: "修改权限",
+    label: `“${entry.name}”的权限（八进制，如 644 / 755）`,
+    value: octalFromMode(entry.mode) || (entry.isDir ? "755" : "644"),
+    confirmLabel: "应用",
+  });
+  if (!input) return;
+  if (!/^[0-7]{3,4}$/.test(input)) return toast("权限要写成八进制，3 位或 4 位，如 644、0755。", "error", 3200);
+  try {
+    await SftpChmod(tab.sessionId, entry.path, input);
+    toast(`“${entry.name}”权限已改为 ${input}`, "success", 2400);
+    await refreshSide(tab, "remote");
+  } catch (err) {
+    fail(err, "修改权限失败");
+  }
 }
 
 async function mkdirPrompt(tab, side, current) {
@@ -1612,16 +2199,21 @@ async function deleteConfirm(tab, side, entry) {
 /**
  * Built-in remote text editor.
  *
- * Loads the file over SFTP, edits it in a textarea, and writes it back with
- * Ctrl+S. Closing with unsaved changes asks first, so a stray Escape cannot
- * throw away an edited config.
+ * Loads the file over SFTP, edits it in a CodeMirror view with syntax
+ * highlighting, and writes it back with Ctrl+S. Closing with unsaved changes
+ * asks first, so a stray Escape cannot throw away an edited config.
  */
 async function openTextEditor(tab, entry) {
-  if (!tab.sessionId) return toast("SFTP 尚未连接。", "error");
+  let sessionId;
+  try {
+    sessionId = await editorSession(tab);
+  } catch (err) {
+    return fail(err, "SFTP 尚未连接");
+  }
 
   let content;
   try {
-    content = await SftpReadTextFile(tab.sessionId, entry.path);
+    content = await SftpReadTextFile(sessionId, entry.path);
   } catch (err) {
     return fail(err, `无法打开 ${entry.name}`);
   }
@@ -1635,7 +2227,7 @@ async function openTextEditor(tab, entry) {
         <span class="editor-path" title="${esc(entry.path)}">${esc(entry.path)}</span>
         <button class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${icon("close")}</button>
       </div>
-      <textarea class="editor-text" spellcheck="false" wrap="off" aria-label="文件内容"></textarea>
+      <div class="editor-host" data-editor></div>
       <div class="modal-foot">
         <span class="editor-status" data-status></span>
         <span class="spacer"></span>
@@ -1644,19 +2236,35 @@ async function openTextEditor(tab, entry) {
       </div>
     </div>`;
 
-  const area = backdrop.querySelector(".editor-text");
+  const host = backdrop.querySelector("[data-editor]");
   const status = backdrop.querySelector("[data-status]");
   const saveBtn = backdrop.querySelector('[data-act="save"]');
   const cancelBtn = backdrop.querySelector('[data-act="cancel"]');
 
-  area.value = content;
-
   let dirty = false;
   let saving = false;
 
-  const updateStatus = () => {
-    const lines = area.value.split("\n").length;
-    status.textContent = `${dirty ? "已修改" : "未修改"} · ${lines} 行 · ${humanSize(area.value.length)}`;
+  $("#modal-root").appendChild(backdrop);
+
+  // 挂载必须在插入 DOM 之后：CodeMirror 首次测量高度需要父节点已有尺寸。
+  const editor = mountCodeEditor(host, {
+    value: content,
+    filename: entry.name,
+    onChange: () => {
+      dirty = true;
+      updateStatus();
+    },
+  });
+
+  function updateStatus() {
+    const text = editor.getValue();
+    const lines = text.split("\n").length;
+    status.textContent = `${dirty ? "已修改" : "未修改"} · ${lines} 行 · ${humanSize(text.length)}`;
+  }
+
+  const dispose = () => {
+    editor.destroy();
+    backdrop.remove();
   };
 
   const close = async () => {
@@ -1669,7 +2277,7 @@ async function openTextEditor(tab, entry) {
       });
       if (!ok) return;
     }
-    backdrop.remove();
+    dispose();
   };
 
   const save = async () => {
@@ -1679,12 +2287,13 @@ async function openTextEditor(tab, entry) {
     cancelBtn.disabled = true;
     status.textContent = "保存中…";
     try {
-      await SftpWriteTextFile(tab.sessionId, entry.path, area.value);
+      await SftpWriteTextFile(sessionId, entry.path, editor.getValue());
       saving = false;
       dirty = false;
-      backdrop.remove();
+      dispose();
       toast(`已保存 ${entry.name}`, "success", 3000);
-      refreshSide(tab, "remote").catch(() => {});
+      // 从终端打开的编辑器没有文件列表面板，保存后不用刷新。
+      if (tab.kind === "sftp") refreshSide(tab, "remote").catch(() => {});
     } catch (err) {
       // Keep the editor and the text: the session may have dropped and the user
       // still needs a chance to retry or copy the content out.
@@ -1696,10 +2305,6 @@ async function openTextEditor(tab, entry) {
     }
   };
 
-  area.addEventListener("input", () => {
-    dirty = true;
-    updateStatus();
-  });
   backdrop.addEventListener("click", (e) => {
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (act === "save") save();
@@ -1717,9 +2322,619 @@ async function openTextEditor(tab, entry) {
     }
   });
 
-  $("#modal-root").appendChild(backdrop);
   updateStatus();
-  area.focus();
+  editor.focus();
+}
+
+/* ================================================================ log viewer */
+
+// 默认只读尾部 2MB：最大的日志 39MB，整份读进来再渲染会把窗口卡住。
+// 需要更早的内容时点"读完整"（后端上限 32MB），或者直接用编辑器打开。
+const LOG_TAIL_BYTES = 2 << 20;
+// 一次只渲染 2000 行，滚到上下边界再往前/往后接一段。
+const LOG_RENDER_STEP = 2000;
+// 单行可能带整段钉钉响应体，截断显示保证 DOM 不会几百万字符；完整内容看编辑器。
+const LOG_LINE_MAX = 3000;
+// 跟随的读取间隔记在本机：盯现场时可以调到 1 秒，平时 2 秒够用。
+const LOG_FOLLOW_KEY = "xssh:logFollowMs";
+const LOG_FOLLOW_DEFAULT = 2000;
+
+// zap JSON 的四个固定字段单独成列，剩下的都算附加字段。
+const LOG_FIELDS = new Set(["time", "level", "caller", "msg"]);
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** zap 的 ISO8601 时间当天都是同一个日期，只留时分秒省宽度。 */
+function shortLogTime(value) {
+  const text = String(value ?? "");
+  const match = /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/.exec(text);
+  return match ? match[1] : text;
+}
+
+/** 解析一行 zap JSON；解析失败（堆栈、分隔行）就原样当纯文本。 */
+function parseLogLine(raw) {
+  const entry = { raw, time: "", level: "", caller: "", text: raw, plain: true };
+  if (!raw.startsWith("{")) return entry;
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return entry;
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return entry;
+
+  entry.plain = false;
+  entry.time = shortLogTime(obj.time);
+  entry.level = String(obj.level ?? "").toUpperCase();
+  entry.caller = String(obj.caller ?? "");
+  const parts = [];
+  if (obj.msg !== undefined) parts.push(String(obj.msg));
+  for (const [key, value] of Object.entries(obj)) {
+    if (LOG_FIELDS.has(key)) continue;
+    parts.push(`${key}=${typeof value === "string" ? value : JSON.stringify(value)}`);
+  }
+  entry.text = parts.join("  ").trim();
+  if (entry.text.length > LOG_LINE_MAX) entry.text = `${entry.text.slice(0, LOG_LINE_MAX)} …`;
+  return entry;
+}
+
+/** 连续完全相同的行折叠成 ×N：zap 的报错常在循环里刷满整屏。 */
+function foldLogLines(lines) {
+  const out = [];
+  for (const raw of lines) {
+    const last = out[out.length - 1];
+    if (last && last.raw === raw) {
+      last.count += 1;
+      continue;
+    }
+    out.push({ ...parseLogLine(raw), count: 1 });
+  }
+  return out;
+}
+
+/**
+ * 过滤表达式：空格分词的 AND。
+ * 普通词按子串搜；`/.../` 是正则；`-词` 是排除。
+ * 正则写错时退回子串匹配，别让整个过滤框失效。
+ */
+function compileLogFilter(query) {
+  const tokens = [];
+  for (const part of String(query).trim().split(/\s+/)) {
+    if (!part) continue;
+    if (part.length > 2 && part.startsWith("/") && part.endsWith("/")) {
+      try {
+        tokens.push({ re: new RegExp(part.slice(1, -1), "i") });
+        continue;
+      } catch {
+        // 落到下面的子串分支
+      }
+    }
+    if (part.startsWith("-") && part.length > 1) tokens.push({ text: part.slice(1).toLowerCase(), exclude: true });
+    else tokens.push({ text: part.toLowerCase() });
+  }
+  return tokens;
+}
+
+/** 命中词包成 <mark>：先在原文里切，再逐段转义，下标不会因实体而错位。 */
+function highlightLogText(text, tokens) {
+  const active = tokens.filter((token) => !token.exclude);
+  if (!active.length) return esc(text);
+  let re;
+  try {
+    re = new RegExp(active.map((token) => (token.re ? token.re.source : escapeRegExp(token.text))).join("|"), "gi");
+  } catch {
+    return esc(text);
+  }
+  let out = "";
+  let last = 0;
+  for (const match of text.matchAll(re)) {
+    if (!match[0]) continue;
+    out += esc(text.slice(last, match.index)) + `<mark>${esc(match[0])}</mark>`;
+    last = match.index + match[0].length;
+  }
+  return out + esc(text.slice(last));
+}
+
+/** 日志默认进只读查看器，其它文件进编辑器。 */
+function openRemoteFile(tab, entry) {
+  if (/\.log(\.\d+)?$/i.test(entry.name || "")) return openLogViewer(tab, entry);
+  return openTextEditor(tab, entry);
+}
+
+/**
+ * 只读日志查看器。
+ *
+ * 一次读进内存、前端过滤：日志按天切分、单文件多数在几 MB 以内，
+ * 所以不做服务端 grep 和增量轮询。默认只读尾部、只渲染最近 2000 行，
+ * 保证 39MB 那种历史文件打开时不会先卡十秒。
+ */
+async function openLogViewer(tab, entry) {
+  let sessionId;
+  try {
+    sessionId = await editorSession(tab);
+  } catch (err) {
+    return fail(err, "SFTP 尚未连接");
+  }
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal log-modal">
+      <div class="modal-head">
+        <span class="modal-title">${icon("file")}<span>${esc(entry.name)}</span></span>
+        <span class="editor-path" title="${esc(entry.path)}">${esc(entry.path)}</span>
+        <button class="btn btn-sm" data-act="edit" title="用内置编辑器打开">${icon("edit")}编辑</button>
+        <button class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${icon("close")}</button>
+      </div>
+      <div class="log-toolbar">
+        <input class="log-filter" data-filter spellcheck="false" autocomplete="off"
+          placeholder="过滤：关键字 · /正则/ · -排除词，空格分隔" aria-label="过滤日志" />
+        <select class="log-level" data-level aria-label="按级别过滤"><option value="">全部级别</option></select>
+        <span class="log-hits" data-hits></span>
+        <button class="btn btn-sm" data-act="prev" title="上一个匹配（Shift+F3）">↑</button>
+        <button class="btn btn-sm" data-act="next" title="下一个匹配（F3）">↓</button>
+        <button class="btn btn-sm" data-act="full" title="读取整个文件（上限 32MB）" hidden>${icon("download")}读完整</button>
+        <button class="btn btn-sm" data-act="follow" aria-pressed="false" title="持续读取新增内容（tail -f）">${icon("down")}跟随</button>
+        <select class="log-rate" data-rate aria-label="跟随间隔" title="跟随读取间隔">
+          <option value="1000">1 秒</option>
+          <option value="2000" selected>2 秒</option>
+          <option value="5000">5 秒</option>
+          <option value="10000">10 秒</option>
+        </select>
+        <button class="btn btn-sm" data-act="refresh" title="重新读取（Ctrl+R）">${icon("refresh")}刷新</button>
+      </div>
+      <div class="log-body" data-body><div class="log-lines" data-lines></div></div>
+      <div class="modal-foot log-foot">
+        <span class="log-status" data-status>读取中…</span>
+        <span class="spacer"></span>
+        <span class="log-hint">双击整行可复制 / 格式化</span>
+        <label class="log-wrap"><input type="checkbox" data-wrap /> 折行</label>
+      </div>
+    </div>`;
+
+  const body = backdrop.querySelector("[data-body]");
+  const linesEl = backdrop.querySelector("[data-lines]");
+  const filterInput = backdrop.querySelector("[data-filter]");
+  const levelSelect = backdrop.querySelector("[data-level]");
+  const hitsEl = backdrop.querySelector("[data-hits]");
+  const statusEl = backdrop.querySelector("[data-status]");
+  const fullBtn = backdrop.querySelector('[data-act="full"]');
+  const followBtn = backdrop.querySelector('[data-act="follow"]');
+  const rateSelect = backdrop.querySelector("[data-rate]");
+  const wrapBox = backdrop.querySelector("[data-wrap]");
+
+  try {
+    const saved = localStorage.getItem(LOG_FOLLOW_KEY) || "";
+    if ([...rateSelect.options].some((option) => option.value === saved)) rateSelect.value = saved;
+  } catch {
+    // 读取失败就按默认 2 秒
+  }
+
+  const view = {
+    entries: [], // 折叠后的全部行
+    rows: [], // 过滤后的行
+    tokens: [],
+    start: 0, // rows 里已渲染区间的起点
+    end: 0, // 终点（不含）
+    match: -1, // 当前跳到的行在 rows 里的下标
+    chunk: null,
+    full: false, // 是否已经按"读完整"读过
+    loading: false,
+    levelSignature: "", // 已生成的级别列表，没变化就不重建下拉
+    follow: false, // 是否在跟随最新（tail -f）
+    offset: 0, // 已读到的文件偏移，跟随从这里接着读
+    busy: false, // 跟随请求进行中，避免重叠
+    timer: 0,
+  };
+  // 程序自己改 scrollTop 时别触发续接逻辑，否则跳到旧匹配会立刻往上翻页。
+  let scrollLock = false;
+
+  const rowHTML = (item, index) => `
+    <div class="log-row${item.plain ? " is-plain" : ""}${item.fresh ? " is-fresh" : ""}" data-i="${index}" title="双击查看整行并复制">
+      ${item.time ? `<span class="log-time">${esc(item.time)}</span>` : ""}
+      ${item.level ? `<span class="log-level lv-${esc(item.level.toLowerCase())}">${esc(item.level)}</span>` : ""}
+      ${item.caller ? `<span class="log-caller" title="${esc(item.caller)}">${esc(item.caller)}</span>` : ""}
+      <span class="log-text">${highlightLogText(item.text, view.tokens)}</span>
+      ${item.count > 1 ? `<span class="log-repeat" title="连续重复 ${item.count} 次">×${item.count}</span>` : ""}
+      <span class="log-actions">
+        <button class="icon-btn log-act" data-act="copy" title="复制整行原文">${icon("copy")}</button>
+        <button class="icon-btn log-act" data-act="raw" title="查看整行（格式化 JSON）">${icon("search")}</button>
+      </span>
+    </div>`;
+
+  function paintLog() {
+    const slice = view.rows.slice(view.start, view.end);
+    linesEl.innerHTML = slice.length
+      ? slice.map((item, i) => rowHTML(item, view.start + i)).join("")
+      : `<div class="file-list-empty">没有可显示的行</div>`;
+    updateLogStatus();
+  }
+
+  /** 过滤后跳回最新一段，滚动条停在底部（查看日志通常先看最新）。 */
+  function applyLogFilter() {
+    view.tokens = compileLogFilter(filterInput.value);
+    const level = levelSelect.value;
+    view.rows = view.entries.filter((item) => {
+      if (level && item.level !== level) return false;
+      const text = item.raw.toLowerCase();
+      return view.tokens.every((token) => {
+        const hit = token.re ? token.re.test(item.raw) : text.includes(token.text);
+        return token.exclude ? !hit : hit;
+      });
+    });
+    view.match = -1;
+    view.end = view.rows.length;
+    view.start = Math.max(0, view.end - LOG_RENDER_STEP);
+    paintLog();
+    scrollLock = true;
+    body.scrollTop = body.scrollHeight;
+    requestAnimationFrame(() => {
+      scrollLock = false;
+    });
+    updateLogHits();
+  }
+
+  function updateLogHits() {
+    if (!view.tokens.length && !levelSelect.value) {
+      hitsEl.textContent = "";
+      hitsEl.classList.remove("is-empty");
+      return;
+    }
+    hitsEl.textContent = view.rows.length
+      ? `命中 ${view.rows.length} 行${view.match >= 0 ? ` · 第 ${view.match + 1}` : ""}`
+      : "没有命中";
+    hitsEl.classList.toggle("is-empty", !view.rows.length);
+  }
+
+  function updateLogStatus() {
+    if (!view.chunk) return;
+    const total = view.entries.reduce((sum, item) => sum + item.count, 0);
+    const parts = [`共 ${total} 行`];
+    if (view.rows.length !== view.entries.length) parts.push(`过滤后 ${view.rows.length}`);
+    parts.push(humanSize(view.chunk.size));
+    if (view.chunk.truncated) parts.push(`只读了最后 ${humanSize(view.chunk.readSize)}`);
+    if (view.follow) parts.push(`跟随中 · 每 ${followInterval() / 1000} 秒`);
+    statusEl.textContent = parts.join(" · ");
+  }
+
+  /** 跳到某条匹配：不在已渲染区间就先重新开一个窗口，再高亮该行。 */
+  function revealLogRow(index) {
+    if (index < view.start) {
+      view.start = index;
+      view.end = Math.min(view.rows.length, index + LOG_RENDER_STEP);
+      paintLog();
+      scrollLock = true;
+      body.scrollTop = 0;
+      requestAnimationFrame(() => {
+        scrollLock = false;
+      });
+    } else if (index >= view.end) {
+      view.end = Math.min(view.rows.length, index + 1);
+      view.start = Math.max(0, view.end - LOG_RENDER_STEP);
+      paintLog();
+      scrollLock = true;
+      body.scrollTop = body.scrollHeight;
+      requestAnimationFrame(() => {
+        scrollLock = false;
+      });
+    }
+    linesEl.querySelector(".log-row.is-current")?.classList.remove("is-current");
+    const row = linesEl.querySelector(`[data-i="${index}"]`);
+    row?.scrollIntoView({ block: "center" });
+    row?.classList.add("is-current");
+  }
+
+  /** 上下一个匹配；没过滤时就是逐行翻，回绕到底部/顶部。 */
+  function jumpLogMatch(step) {
+    if (!view.rows.length) return;
+    const len = view.rows.length;
+    const next = view.match < 0 ? (step > 0 ? 0 : len - 1) : (view.match + step + len) % len;
+    view.match = next;
+    revealLogRow(next);
+    updateLogHits();
+  }
+
+  /** 级别下拉按实际出现过的级别生成，常见级别排前面，其余按字母序。 */
+  function fillLevelOptions() {
+    const order = ["ERROR", "WARN", "INFO", "DEBUG", "TRACE"];
+    const levels = [...new Set(view.entries.map((item) => item.level).filter(Boolean))];
+    levels.sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99) || a.localeCompare(b));
+    // 跟随刷新时级别通常不变；重建 innerHTML 会把展开的下拉关掉，所以没新级别就跳过
+    const signature = levels.join(",");
+    if (signature === view.levelSignature) return;
+    view.levelSignature = signature;
+    const current = levelSelect.value;
+    levelSelect.innerHTML = [
+      `<option value="">全部级别</option>`,
+      ...levels.map((level) => `<option value="${esc(level)}">${esc(level)}</option>`),
+    ].join("");
+    levelSelect.value = levels.includes(current) ? current : "";
+  }
+
+  async function loadLog() {
+    if (view.loading) return;
+    view.loading = true;
+    statusEl.textContent = "读取中…";
+    try {
+      const chunk = await SftpReadLog(sessionId, entry.path, view.full ? 0 : LOG_TAIL_BYTES);
+      view.chunk = chunk;
+      view.offset = chunk.size;
+      // 文件以换行结尾时 split 会多出一个空串，去掉免得渲染空白行；
+      // 老服务端偶尔带 BOM，不去掉第一行就不是 JSON 了。
+      const lines = chunk.content.replace(/^\uFEFF/, "").split("\n");
+      if (lines[lines.length - 1] === "") lines.pop();
+      view.entries = foldLogLines(lines);
+      fullBtn.hidden = !chunk.truncated || view.full;
+      fillLevelOptions();
+      applyLogFilter();
+    } catch (err) {
+      statusEl.textContent = "读取失败";
+      fail(err, `无法打开 ${entry.name}`);
+    } finally {
+      view.loading = false;
+    }
+  }
+
+  /** 追加一段新增内容：折叠规则和首屏一致，连续重复的行继续累加 ×N。 */
+  function appendLogChunk(content) {
+    const lines = content.replace(/^\uFEFF/, "").split("\n");
+    if (lines[lines.length - 1] === "") lines.pop();
+    if (!lines.length) return;
+    for (const raw of lines) {
+      const last = view.entries[view.entries.length - 1];
+      if (last && last.raw === raw) {
+        last.count += 1;
+        // 这一行又出现了一次，同样算"跟随后新来的"
+        last.fresh = true;
+        continue;
+      }
+      view.entries.push({ ...parseLogLine(raw), count: 1, fresh: true });
+    }
+    // 新行可能带来新的级别，下拉要跟着长
+    fillLevelOptions();
+    // 重算过滤会一并滚到最新一行，正是"跟随"想要的落点
+    applyLogFilter();
+  }
+
+  async function followOnce() {
+    if (!view.follow || view.busy || !view.chunk) return;
+    view.busy = true;
+    try {
+      const inc = await SftpTailLog(sessionId, entry.path, view.offset);
+      // 等待期间弹层可能已经关了，结果直接丢掉
+      if (!view.follow || !backdrop.isConnected) return;
+      if (inc.reset) {
+        // 文件被轮转/截断，offset 已经失效：整体重读尾部
+        view.full = false;
+        view.busy = false;
+        await loadLog();
+        return;
+      }
+      view.offset = inc.next;
+      view.chunk.size = inc.size;
+      // 跟随读到的新内容也算进"已读大小"，否则状态栏一直停在上次刷新的数字
+      view.chunk.readSize += inc.content.length;
+      if (inc.content) appendLogChunk(inc.content);
+      else updateLogStatus();
+    } catch (err) {
+      setFollow(false);
+      statusEl.textContent = "跟随已停止";
+      fail(err, "日志跟随中断");
+    } finally {
+      view.busy = false;
+    }
+  }
+
+  /** 跟随间隔：下拉里的值就是毫秒数，取不到就按默认 2 秒。 */
+  function followInterval() {
+    const ms = Number(rateSelect.value);
+    return Number.isFinite(ms) && ms >= 500 ? ms : LOG_FOLLOW_DEFAULT;
+  }
+
+  function setFollow(on) {
+    view.follow = on;
+    clearInterval(view.timer);
+    view.timer = 0;
+    followBtn.classList.toggle("btn-primary", on);
+    followBtn.setAttribute("aria-pressed", String(on));
+    followBtn.innerHTML = `${icon("down")}${on ? "跟随中" : "跟随"}`;
+    if (!on) {
+      updateLogStatus();
+      return;
+    }
+    // 开跟随时先跳到最新，之后按选定的间隔只取新增的完整行
+    if (view.chunk) view.offset = view.chunk.size;
+    if (view.rows.length) {
+      view.match = -1;
+      view.end = view.rows.length;
+      view.start = Math.max(0, view.end - LOG_RENDER_STEP);
+      paintLog();
+      body.scrollTop = body.scrollHeight;
+    }
+    view.timer = setInterval(followOnce, followInterval());
+    updateLogStatus();
+  }
+
+  let filterTimer = 0;
+  filterInput.addEventListener("input", () => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(applyLogFilter, 120);
+  });
+  levelSelect.addEventListener("change", applyLogFilter);
+  rateSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem(LOG_FOLLOW_KEY, rateSelect.value);
+    } catch {
+      // 存不下就只在本次打开期间生效
+    }
+    // 正在跟随就按新间隔重排，不用让用户先关再开
+    if (view.follow) {
+      clearInterval(view.timer);
+      view.timer = setInterval(followOnce, followInterval());
+    }
+    updateLogStatus();
+  });
+  wrapBox.addEventListener("change", () => linesEl.classList.toggle("is-wrap", wrapBox.checked));
+
+  /** 复制到系统剪贴板，失败给条错误提示。 */
+  function copyLog(text, label) {
+    writeClipboard(text)
+      .then(() => toast(`已复制${label}`, "success", 2200))
+      .catch((err) => fail(err, "复制失败"));
+  }
+
+  /**
+   * 整行详情。
+   *
+   * 一行 zap JSON 经常几 KB，缩进后才有法读，所以默认展示格式化结果；
+   * 同时保留"复制原文"，贴去别的工具时不会被格式化改动。
+   */
+  function showLogDetail(item) {
+    let pretty = item.raw;
+    try {
+      pretty = JSON.stringify(JSON.parse(item.raw), null, 2);
+    } catch {
+      // 非 JSON 行（堆栈、分隔线）没有结构可格式化，原样展示
+    }
+
+    const detail = document.createElement("div");
+    detail.className = "modal-backdrop";
+    detail.innerHTML = `
+      <div class="modal log-detail-modal">
+        <div class="modal-head">
+          <span class="modal-title">${icon("file")}<span>${esc(item.time || "日志行")}${item.level ? ` · ${esc(item.level)}` : ""}</span></span>
+          <span class="editor-path">${esc(item.caller)}</span>
+          <button class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${icon("close")}</button>
+        </div>
+        <pre class="log-raw" data-raw tabindex="0"></pre>
+        <div class="modal-foot log-foot">
+          <span class="log-status">${item.count > 1 ? `连续出现 ${item.count} 次 · ` : ""}原文 ${item.raw.length} 字符</span>
+          <span class="spacer"></span>
+          <button class="btn" data-act="copy-raw">复制原文</button>
+          <button class="btn btn-primary" data-act="copy-pretty">复制格式化</button>
+        </div>
+      </div>`;
+
+    const pre = detail.querySelector("[data-raw]");
+    pre.textContent = pretty;
+
+    function closeDetail() {
+      window.removeEventListener("keydown", onDetailKey);
+      detail.remove();
+    }
+
+    // 详情可能压在日志弹层上，Escape 只关最上层的那一个。
+    function onDetailKey(e) {
+      if (!detail.isConnected || $("#modal-root").lastElementChild !== detail) return;
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeDetail();
+    }
+
+    detail.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]")?.dataset.act;
+      if (act === "close") closeDetail();
+      else if (act === "copy-raw") copyLog(item.raw, "原文");
+      else if (act === "copy-pretty") copyLog(pretty, "格式化内容");
+      else if (e.target === detail) closeDetail();
+    });
+
+    $("#modal-root").appendChild(detail);
+    window.addEventListener("keydown", onDetailKey);
+    pre.focus();
+  }
+
+  // 双击整行看完整内容：折行宽度有限时，几 KB 的一行只能靠这个复制出去。
+  body.addEventListener("dblclick", (e) => {
+    if (e.target.closest(".log-actions")) return;
+    const row = e.target.closest(".log-row");
+    const item = row ? view.rows[Number(row.dataset.i)] : null;
+    if (item) showLogDetail(item);
+  });
+
+  body.addEventListener("scroll", () => {
+    if (scrollLock || view.loading || !view.rows.length) return;
+    if (body.scrollTop < 40) {
+      if (view.start === 0) return;
+      const before = body.scrollHeight;
+      const top = body.scrollTop;
+      view.start = Math.max(0, view.start - LOG_RENDER_STEP);
+      paintLog();
+      scrollLock = true;
+      body.scrollTop = top + (body.scrollHeight - before);
+      requestAnimationFrame(() => {
+        scrollLock = false;
+      });
+    } else if (body.scrollTop + body.clientHeight > body.scrollHeight - 40) {
+      if (view.end >= view.rows.length) return;
+      view.end = Math.min(view.rows.length, view.end + LOG_RENDER_STEP);
+      paintLog();
+    }
+  });
+
+  backdrop.addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "copy" || act === "raw") {
+      const item = view.rows[Number(e.target.closest(".log-row")?.dataset.i)];
+      if (!item) return;
+      if (act === "raw") showLogDetail(item);
+      else copyLog(item.raw, "整行原文");
+      return;
+    }
+    if (act === "close") dispose();
+    else if (act === "refresh") {
+      view.full = false;
+      loadLog();
+    } else if (act === "full") {
+      view.full = true;
+      loadLog();
+    } else if (act === "follow") setFollow(!view.follow);
+    else if (act === "prev") jumpLogMatch(-1);
+    else if (act === "next") jumpLogMatch(1);
+    else if (act === "edit") openTextEditor(tab, entry);
+    else if (e.target === backdrop) dispose();
+  });
+
+  // 快捷键挂在 window 上：点过日志正文后焦点会落到 body，挂在弹层上就收不到按键了。
+  // 只在日志弹层是最上层时处理，否则叠在上面的编辑器/确认框会被抢走 Escape。
+  function onKey(e) {
+    if (!backdrop.isConnected || $("#modal-root").lastElementChild !== backdrop) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      dispose();
+    } else if (e.key === "F3") {
+      e.preventDefault();
+      jumpLogMatch(e.shiftKey ? -1 : 1);
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      filterInput.focus();
+      filterInput.select();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
+      e.preventDefault();
+      view.full = false;
+      loadLog();
+    } else if (e.key === "Enter" && e.target === filterInput) {
+      e.preventDefault();
+      // 输入防抖还没触发时先过滤，否则跳的是上一次的结果。
+      clearTimeout(filterTimer);
+      applyLogFilter();
+      jumpLogMatch(1);
+    }
+  }
+
+  function dispose() {
+    clearTimeout(filterTimer);
+    clearInterval(view.timer);
+    window.removeEventListener("keydown", onKey);
+    backdrop.remove();
+  }
+
+  window.addEventListener("keydown", onKey);
+  $("#modal-root").appendChild(backdrop);
+  filterInput.focus();
+  loadLog();
 }
 
 async function doUpload(tab, entry = tab.localSel) {
@@ -1985,6 +3200,15 @@ async function openSettings() {
         </div>
         <div class="appearance-actions"><span class="hint">主题自动保存，下次启动沿用。</span><button class="btn btn-sm" data-act="reset-appearance">恢复默认</button></div>
         <div class="field">
+          <label>本地文件起始目录</label>
+          <div class="hint">打开文件管理时，左边本地面板从哪个目录开始。不设置就跟着系统走（家目录所在的盘）。</div>
+          <div class="hint" style="font-family:var(--mono);word-break:break-all">${esc(state.localStart || "跟随系统（家目录所在盘）")}</div>
+          <div class="appearance-actions">
+            <button class="btn btn-sm" data-act="pick-local-start">${icon("folder")}选择目录</button>
+            <button class="btn btn-sm" data-act="reset-local-start"${state.localStart ? "" : " disabled"}>恢复默认</button>
+          </div>
+        </div>
+        <div class="field">
           <label>主机备份</label>
           <div class="hint">导出文件用你设置的密码加密，包含分组、主机和已保存的凭据，可在另一台电脑导入。文件不含明文密码，请牢记密码——丢失后无法恢复。</div>
           <div class="appearance-actions">
@@ -2028,7 +3252,7 @@ async function openSettings() {
     const themeId = e.target.closest("[data-theme-choice]")?.dataset.themeChoice;
     const action = e.target.closest("[data-act]")?.dataset.act;
     if (themeId || action === "reset-appearance") {
-      state.appearance = themeId ? { ...state.appearance, theme: themeId } : { theme: "graphite" };
+      state.appearance = themeId ? { ...state.appearance, theme: themeId } : normalizeAppearance();
       updateAppearance();
       for (const button of backdrop.querySelectorAll("[data-theme-choice]")) {
         button.setAttribute("aria-pressed", String(button.dataset.themeChoice === state.appearance.theme));
@@ -2048,6 +3272,26 @@ async function openSettings() {
       return;
     }
     const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "pick-local-start") {
+      try {
+        const picked = await PickLocalDirectory();
+        if (!picked) return; // 取消选择，不动现有设置
+        state.localStart = picked;
+        saveLocalStart(picked);
+        backdrop.remove();
+        openSettings();
+      } catch (err) {
+        fail(err, "选择目录失败");
+      }
+      return;
+    }
+    if (act === "reset-local-start") {
+      state.localStart = "";
+      saveLocalStart("");
+      backdrop.remove();
+      openSettings();
+      return;
+    }
     if (act === "export-backup") {
       exportBackupDialog();
       return;
@@ -2259,7 +3503,7 @@ function wireSorting() {
     return event.clientY > rect.top + rect.height / 2;
   };
 
-  for (const selector of ["#tree", "#host-grid"]) {
+  for (const selector of ["#host-grid"]) {
     const container = $(selector);
     container.addEventListener("dragstart", (event) => {
       const heading = event.target.closest(itemSelector);
@@ -2341,12 +3585,12 @@ function wireEvents() {
     renderSidebar();
   });
 
-  $("#btn-new-host").addEventListener("click", () => hostEditor(null));
   $("#btn-empty-new").addEventListener("click", () => hostEditor(null));
   $("#btn-new-group").addEventListener("click", () => groupEditor(null));
+  $("#btn-new-snippet").addEventListener("click", () => snippetEditor(null));
   $("#btn-settings").addEventListener("click", openSettings);
 
-  $("#host-grid").addEventListener("click", (e) => {
+  $("#host-grid").addEventListener("click", async (e) => {
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (act === "new-host") return hostEditor(null);
     if (act === "clear-search") {
@@ -2354,6 +3598,25 @@ function wireEvents() {
       $("#search").value = "";
       renderSidebar();
       $("#search").focus();
+      return;
+    }
+    if (act === "edit-group" || act === "del-group") {
+      const groupId = e.target.closest("[data-group]")?.dataset.group;
+      const group = state.profile.groups.find((g) => g.id === groupId);
+      if (!group) return;
+      if (act === "edit-group") return groupEditor(group);
+      const ok = await confirmDialog({
+        title: "删除分组",
+        message: `确定删除分组“${group.name}”？组内主机将移至“未分组”。`,
+        confirmLabel: "删除",
+      });
+      if (!ok) return;
+      try {
+        await DeleteGroup(groupId);
+        await reloadProfile();
+      } catch (err) {
+        fail(err, "删除分组失败");
+      }
       return;
     }
     const hostRow = e.target.closest("[data-host]");
@@ -2387,90 +3650,37 @@ function wireEvents() {
   });
 
   // Space selects a host; Enter connects. Nested buttons keep native activation.
-  for (const selector of ["#tree", "#tabstrip"]) {
-    $(selector).addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      if (!e.target.matches(".host-row, .group-head[data-group], .tab")) return;
-      e.preventDefault();
-      if (e.repeat) return;
-      if (e.target.matches(".host-row") && e.key === "Enter") {
-        selectHost(e.target.dataset.host);
-        const host = state.profile.hosts.find(h => h.id === e.target.dataset.host);
-        if (host) openTerminalTab(host);
-        return;
-      }
-      e.target.click();
-    });
-  }
+  $("#tabstrip").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (!e.target.matches(".tab")) return;
+    e.preventDefault();
+    if (e.repeat) return;
+    e.target.click();
+  });
 
-  $("#tree").addEventListener("click", async (e) => {
+  $("#recent-hosts").addEventListener("click", (e) => {
+    const host = state.profile.hosts.find((h) => h.id === e.target.closest("[data-recent]")?.dataset.recent);
+    if (host) openHostSession(host);
+  });
+
+  $("#snippets").addEventListener("click", (e) => {
+    const item = e.target.closest("[data-snippet]");
+    if (!item) return;
+    const snippet = state.snippets.find((entry) => entry.id === item.dataset.snippet);
+    if (!snippet) return;
     const act = e.target.closest("[data-act]")?.dataset.act;
-
-    if (act) {
-      const hostId = e.target.closest("[data-host]")?.dataset.host;
-      const groupId = e.target.closest("[data-group]")?.dataset.group;
-      const host = state.profile.hosts.find((h) => h.id === hostId);
-
-      if (act === "terminal" && host) return openTerminalTab(host);
-      if (act === "sftp" && host) return openSftpTab(host);
-      if (act === "edit" && host) return hostEditor(host);
-
-      if (act === "edit-group" && groupId) {
-        const group = state.profile.groups.find((g) => g.id === groupId);
-        return groupEditor(group);
-      }
-      if (act === "del-group" && groupId) {
-        const group = state.profile.groups.find((g) => g.id === groupId);
-        const ok = await confirmDialog({
-          title: "删除分组",
-          message: `确定删除分组“${group.name}”？组内主机将移至“未分组”。`,
-          confirmLabel: "删除",
-        });
-        if (ok) {
-          try {
-            await DeleteGroup(groupId);
-            await reloadProfile();
-          } catch (err) {
-            fail(err, "删除分组失败");
-          }
-        }
-        return;
-      }
-      return;
-    }
-
-    const groupHead = e.target.closest("[data-group]");
-    if (groupHead) {
-      const id = groupHead.dataset.group;
-      if (state.expanded.has(id)) state.expanded.delete(id);
-      else state.expanded.add(id);
-      renderSidebar();
-      return;
-    }
-
-    const hostRow = e.target.closest("[data-host]");
-    if (hostRow) {
-      selectHost(hostRow.dataset.host);
-    }
+    if (act === "edit-snippet") return snippetEditor(snippet);
+    if (act === "del-snippet") return deleteSnippet(snippet);
+    runSnippet(snippet);
   });
 
-  $("#tree").addEventListener("dblclick", (e) => {
-    if (e.target.closest("button")) return;
-    const row = e.target.closest(".host-row");
-    const host = state.profile.hosts.find(h => h.id === row?.dataset.host);
-    if (host) {
-      selectHost(host.id);
-      openTerminalTab(host);
-    }
-  });
-
-  $("#tree").addEventListener("contextmenu", (e) => {
-    const hostRow = e.target.closest("[data-host]");
-    if (hostRow) {
-      e.preventDefault();
-      const host = state.profile.hosts.find((h) => h.id === hostRow.dataset.host);
-      if (host) hostEditor(host);
-    }
+  $("#snippets").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const item = e.target.closest("[data-snippet]");
+    if (!item || e.target.closest("button")) return;
+    e.preventDefault();
+    const snippet = state.snippets.find((entry) => entry.id === item.dataset.snippet);
+    if (snippet) runSnippet(snippet);
   });
 
   $("#tabstrip").addEventListener("click", (e) => {
@@ -2497,6 +3707,14 @@ function wireEvents() {
     }
     if ((e.ctrlKey || e.metaKey) && ["f", "k"].includes(e.key.toLowerCase()) && !$("#modal-root").children.length) {
       e.preventDefault();
+      const tab = activeTab();
+      // 终端里 Ctrl+F 是"在输出里查"，不是回主机列表搜主机。
+      if (e.key.toLowerCase() === "f" && tab?.kind === "terminal" && tab.openFind) {
+        tab.openFind();
+        return;
+      }
+      // 搜索框在主面板上，终端页得先退回去才看得见
+      if (tab) setActiveTab(null);
       $("#search").focus();
       $("#search").select();
     }
@@ -2703,7 +3921,27 @@ function renderTransfers() {
 
 /* ==================================================================== init */
 
+/**
+ * 窗口默认是 1440×900，在 1080p 以下或开了缩放的屏幕上会有一截落到屏幕外。
+ * 启动时按当前屏幕的工作区（已扣除任务栏）收一次，放得下就不动。
+ */
+function fitWindowToScreen() {
+  try {
+    // screen.avail* 和 outer* 都是 CSS 像素，与 Wails 的 DIP 同一坐标系，不用自己换算 DPI。
+    const maxWidth = Math.floor(screen.availWidth * 0.94);
+    const maxHeight = Math.floor(screen.availHeight * 0.94);
+    if (window.outerWidth <= maxWidth && window.outerHeight <= maxHeight) return;
+    WindowSetSize(Math.min(window.outerWidth, maxWidth), Math.min(window.outerHeight, maxHeight));
+    WindowCenter();
+  } catch (err) {
+    fail(err, "调整窗口尺寸失败");
+  }
+}
+
 async function init() {
+  fitWindowToScreen();
+  state.localStart = loadLocalStart();
+  state.snippets = loadSnippets();
   updateAppearance();
   mountIcons();
   wireEvents();
@@ -2717,7 +3955,7 @@ init();
 function selectHost(id) {
   state.selectedHostId = id;
   // Preserve the DOM between click events so a native double-click can fire.
-  for (const row of document.querySelectorAll("#tree .host-row, #host-grid .host-item")) {
+  for (const row of document.querySelectorAll("#host-grid .host-item")) {
     row.classList.toggle("selected", row.dataset.host === id);
   }
 }

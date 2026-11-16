@@ -169,6 +169,42 @@ export namespace model {
 
 export namespace sftpx {
 	
+	export class LogChunk {
+	    content: string;
+	    size: number;
+	    readSize: number;
+	    truncated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogChunk(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.size = source["size"];
+	        this.readSize = source["readSize"];
+	        this.truncated = source["truncated"];
+	    }
+	}
+	export class LogIncrement {
+	    content: string;
+	    size: number;
+	    next: number;
+	    reset: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LogIncrement(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.size = source["size"];
+	        this.next = source["next"];
+	        this.reset = source["reset"];
+	    }
+	}
 	export class TaskView {
 	    id: string;
 	    sessionId: string;
